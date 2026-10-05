@@ -1,0 +1,70 @@
+# Builds both plugins, runs the unit tests and packages dist/ags-mcp-<version>.zip.
+# A pushed tag v<version> (matching <Version> in Directory.Build.props) also publishes a GitHub release
+# with the zip attached. Run it by hand (workflow_dispatch) to get the zip as a build artifact only.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # The editor is only needed to compile against (AGS.Types.dll, AGSEditor.exe, Newtonsoft.Json.dll); it is not shipped.
+  AGS_TAG: v3.6.2.21
+  AGS_ZIP: AGS-3.6.2.21-P11.zip
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).SelectSingleNode("//Version").InnerText
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match <Version>$version</Version> in Directory.Build.props."
+          }
+
+      - name: Download the AGS editor
+        run: |
+          $base = "https://github.com/adventuregamestudio/ags/releases/download/$env:AGS_TAG"
+          $zip = Join-Path $env:RUNNER_TEMP $env:AGS_ZIP
+          Invoke-WebRequest "$base/$env:AGS_ZIP" -OutFile $zip
+          Invoke-WebRequest "$base/checksums.sha256" -OutFile "$env:RUNNER_TEMP\checksums.sha256"
+          $line = Get-Content "$env:RUNNER_TEMP\checksums.sha256" | Where-Object { $_ -match [regex]::Escape($env:AGS_ZIP) }
+          if (-not $line) { throw "$env:AGS_ZIP is not listed in checksums.sha256." }
+          $expected = ($line -split '\s+')[0]
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Checksum mismatch for ${env:AGS_ZIP}: $actual, expected $expected." }
+          Expand-Archive $zip "$env:RUNNER_TEMP\ags"
+          $exe = Get-ChildItem "$env:RUNNER_TEMP\ags" -Recurse -Filter AGSEditor.exe | Select-Object -First 1
+          if (-not $exe) { throw "AGSEditor.exe not found in $env:AGS_ZIP." }
+          "AGS_DIR=$($exe.DirectoryName)" >> $env:GITHUB_ENV
+
+      - name: Build, test and package
+        run: .\build.ps1 -AgsDir $env:AGS_DIR -Engine -Test -Package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ags-mcp
+          path: dist/*.zip
+
+      - name: Publish the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = (Get-ChildItem dist\*.zip | Select-Object -First 1).FullName
+          gh release create $env:GITHUB_REF_NAME $zip --title "AGS MCP $env:GITHUB_REF_NAME" --generate-notes

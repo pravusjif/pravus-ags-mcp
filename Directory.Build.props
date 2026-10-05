@@ -1,0 +1,15 @@
+<Project>
+  <!-- Machine-specific paths (AgsDir, AgsSourceDir) come from the git-ignored Local.props.
+       See Local.props.example. -p:AgsDir=... on the command line overrides it. -->
+  <Import Project="$(MSBuildThisFileDirectory)Local.props" Condition="Exists('$(MSBuildThisFileDirectory)Local.props')" />
+
+  <PropertyGroup>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <Target Name="RequireAgsDir" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(AgsDir)\AGSEditor.exe')">
+    <Error Text="AgsDir must point to an AGS 3.6.x editor folder (the one that contains AGSEditor.exe), but it is '$(AgsDir)'. Copy Local.props.example to Local.props and set AgsDir, or pass -p:AgsDir=..." />
+  </Target>
+</Project>

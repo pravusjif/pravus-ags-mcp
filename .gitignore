@@ -1,0 +1,19 @@
+bin/
+obj/
+.vs/
+*.user
+TestResults/
+__pycache__/
+
+# Machine-specific paths (see Local.props.example)
+Local.props
+
+# Release packages (build.ps1 -Package)
+dist/
+.vscode
+
+# Native engine plugin (agsmcp.dll) CMake output
+src/AgsMcp.Engine/build/
+
+# skill eval runs
+skills/ags-mcp-workspace/

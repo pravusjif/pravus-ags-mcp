@@ -1,0 +1,53 @@
+{
+  "skill_name": "ags-mcp",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a new room to the AGS game I have open in the editor: a small storeroom reached from the room the player starts in. Draw simple pixel art for it. Put a lantern in it that the player can pick up (it becomes a new inventory item), and an exit that leads back. Don't change anything else in the existing rooms apart from the way in. When it's done, check in the running game that I can get there and pick up the lantern.",
+      "expected_output": "A new room with a drawn background, a walkable floor, an exit back and a lantern object whose Interact handler adds a new lantern inventory item; the player's starting room gains only an exit into it; scripts compile; the project is saved; and a game_* check in the user's game shows the lantern in the player's inventory.",
+      "files": [],
+      "expectations": [
+        "The agent worked in the project that was open (project_info at the start and end report the same projectFolder) and did not call create_project or open_project",
+        "A new room exists (list_rooms) and its background is not the blank black default (render_room shows drawn content)",
+        "The new room has a painted walkable area and the lantern object's position lies inside it or within reach of it",
+        "The new room has an object for the lantern whose Interact handler adds a new lantern inventory item and hides the object",
+        "A new inventory item for the lantern exists with a non-zero Image sprite",
+        "The player's starting room has a new exit (region or hotspot handler) that changes to the new room, and the new room has an exit back; the starting room's other hotspots, objects and handlers are unchanged",
+        "compile reports 0 errors for the touched room scripts and the modules, and save_project was called after the entity and sprite changes",
+        "The game was run with the game_* tools in the user's project, the player reached the new room, and game_state showed the lantern's inventory ID in player.inventory after the pickup"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "In the room the player starts in, make one of the existing hotspots hide a coin: the first time the player interacts with it, a coin appears on the floor nearby and can be picked up as a new inventory item. Draw a tiny coin sprite. Keep everything else in the room as it is, and make sure it works in the game.",
+      "expected_output": "The starting room gains a hidden coin object revealed once by an existing hotspot's Interact handler (keeping its original behaviour), a coin sprite and inventory item exist, scripts compile, the project is saved, and a game_* check shows the coin in the inventory.",
+      "files": [],
+      "expectations": [
+        "The agent read the starting room first (get_room and read_script for it) before changing anything",
+        "A new sprite was imported for the coin and a new coin inventory item uses it as Image",
+        "The starting room has a new coin object that starts invisible, placed on or next to the walkable floor",
+        "The chosen hotspot's Interact handler reveals the coin only once (a flag, Game.DoOnceOnly or the object's Visible state) and keeps whatever it did before",
+        "The coin object has an Interact handler that adds the coin item and hides the object",
+        "The room's other hotspots, objects and handlers are unchanged",
+        "compile reports 0 errors and save_project was called",
+        "The game was run in the user's project and game_state after the check shows the coin's inventory ID in player.inventory",
+        "The agent checked where clicks would land (game_hover_name or equivalent) rather than clicking blindly, or the clicks succeeded on the first attempt"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Add a cat to the room the player starts in. It sits somewhere on the floor with a simple 2-frame pixel-art idle animation. Looking at it gives a line; talking to it starts a short dialog with two options (one ends the dialog). Check in the running game that talking to the cat opens the dialog.",
+      "expected_output": "A cat character with a 2-frame view placed in the starting room on the walkable floor, Look and Talk events bound in GlobalScript, a dialog with two options and a script, project saved, compile clean, and a game_* check that talks to the cat and observes the dialog.",
+      "files": [],
+      "expectations": [
+        "Two sprites were imported for the cat and a view with one loop of two frames references them",
+        "A cat character exists with NormalView set to that view, StartingRoom set to the player's starting room and StartX/StartY on its walkable floor",
+        "The cat has Look and Talk events bound to functions in GlobalScript.asc; the Talk handler starts the cat dialog",
+        "A dialog exists with exactly two options and a dialog script where one option ends with stop",
+        "compile reports 0 errors and save_project was called before run_game",
+        "The game was run in the user's project, the agent clicked the cat in Talk mode, and gathered evidence that the dialog started (a screenshot showing the options, or game_state showing the interface disabled / dialog active)",
+        "The view's script name does not clash with the character's derived macro (the view is not named like the character without its c prefix)"
+      ]
+    }
+  ]
+}

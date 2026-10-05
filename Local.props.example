@@ -1,0 +1,17 @@
+<!--
+  Machine-specific paths for this repo. Copy this file to Local.props (git-ignored) and edit it.
+
+  Directory.Build.props imports Local.props for every project, and build.ps1 reads it through
+  tools/LocalProps.ps1. A value passed on the command line (-AgsDir, or -p:AgsDir=...) overrides
+  the one here.
+-->
+<Project>
+  <PropertyGroup>
+    <!-- AGS 3.6.x editor folder, the one that contains AGSEditor.exe. Required to build. -->
+    <AgsDir>C:\AGS-3.6.2</AgsDir>
+
+    <!-- Unpacked AGS source tree (ags_3.6.2.21_source.zip), for looking up editor and engine
+         internals. Optional; nothing reads it automatically. -->
+    <AgsSourceDir>C:\ags-src\ags_3.6.2.21_source</AgsSourceDir>
+  </PropertyGroup>
+</Project>
