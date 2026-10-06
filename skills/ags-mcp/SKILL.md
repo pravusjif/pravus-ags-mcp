@@ -59,6 +59,15 @@ Check against the live project, with the same input a player would give. Static 
 
 Then play the changed interaction in the running game with the `game_*` tools ([references/playtesting.md](references/playtesting.md)): `save_project`, `run_game startRoom=N`, then hover, click in the right cursor mode, wait, and assert on `game_state` (object `visible`, `inventory`, character `room`, `x,y`). Screenshots confirm the look; state confirms the behaviour. Play only what the task changed (plus anything it could have broken), stop the game when done, and report what you observed.
 
+**Always run the play-test in a subagent, never in your own context.** The `game_*` loop returns large `game_state` payloads and screenshots, and they would fill your context. Call `save_project` yourself, then start one subagent with everything it needs, because it cannot see your conversation:
+
+- the start room, and the player's start point if you already know it;
+- each step to play, with its coordinates, cursor mode and inventory ID;
+- the exact assertion after each step (for example "`objects[2].visible` is false", "`player.inventory` contains item 3");
+- an instruction to read `references/playtesting.md` first, to call `stop_game` at the end, and not to edit the project. The subagent may only add a temporary aid if you allow it, and must then remove it.
+
+Ask it to report back briefly: pass or fail for each assertion with the observed values, any `get_game_log` errors, and a description of anything unexpected. It should not paste raw state dumps. Fix failures yourself, then start a new subagent to play the test again.
+
 The `game_*` tools need the `agsmcp` engine plugin enabled in the project. If `project_info` does not list `agsmcp.dll` under `plugins`, tell the user that `runtime_enable_plugin` turns it on for this game (and that they should untick it in the Plugins node before a release build), and enable it only with their agreement.
 
 ## References
@@ -67,5 +76,5 @@ Read each one when you reach that part of the job rather than all up front; they
 
 - [references/tools.md](references/tools.md): every tool with its argument shapes and the quirks that matter. Read it when unsure what a tool takes or returns.
 - [references/scripting.md](references/scripting.md): AGS 3.6 script patterns that work (handlers, inventory, state, dialog scripts, NPC entrances, ambient animated characters) and the usual pitfalls. Read it before writing handlers.
-- [references/playtesting.md](references/playtesting.md): the `game_*` loop: cursor modes, waiting correctly, dismissing message boxes, exact assertions. Read it before checking behaviour in the running game.
+- [references/playtesting.md](references/playtesting.md): the `game_*` loop: cursor modes, waiting correctly, dismissing message boxes, exact assertions. The play-test subagent reads it before it checks behaviour in the running game.
 - [references/pixel-art.md](references/pixel-art.md): generating crisp pixel-art backgrounds and sprites with Python/PIL, plus `scripts/pixelart.py`. Read it when you are about to draw.

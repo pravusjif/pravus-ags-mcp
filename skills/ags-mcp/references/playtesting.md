@@ -2,6 +2,8 @@
 
 The `game_*` tools talk to a built copy of the user's game through the `agsmcp` engine plugin. They let you play the interaction you just built, with real mouse and keyboard input, and assert on real engine state. That catches wrong coordinates, unreachable hotspots and broken flags that reading the script never would. Always check in the user's own project; never build a separate test game for it.
 
+**This loop always runs in a subagent**, not in the main agent's context, so that `game_state` dumps and screenshots stay out of the main context. The main agent saves the project and gives the subagent the room, the steps and the expected assertions (see "Verifying in the user's game" in SKILL.md). If you are that subagent, play only what you were asked to play, stop the game at the end, change nothing in the project, and report pass or fail for each assertion with the observed values, not raw dumps.
+
 ## One-time setup per project
 
 The engine plugin has to be enabled in the project. `project_info` lists `agsmcp.dll` under `plugins` once it is on. If it is not:
