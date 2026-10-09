@@ -159,6 +159,8 @@ README and LICENSE). Running the workflow by hand produces the zip as a build ar
 
 All tools carry `readOnlyHint`/`destructiveHint` annotations. Changes to the project model are in memory until you
 call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts either the numeric ID or the script name.
+The names in the signatures below are the argument keys, and `[x]` marks an optional one. An argument a tool does not
+take is refused, with the list of the ones it does.
 
 ### Project
 | Tool | Description |
@@ -175,7 +177,7 @@ call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts eith
 |------|-------------|
 | `get_properties(type, id)` | All properties of an entity (honours the editor's property-grid metadata), plus its events for characters and inventory items. |
 | `set_properties(type, id, properties)` | Set one or more properties (enum by name or number; script-name uniqueness enforced). |
-| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, audio type, audio folder, global variable or custom-property definition. |
+| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, audio type, audio folder, global variable or custom-property definition. Properties that fit nothing are listed in `ignored`. |
 | `delete_entity(type, id)` | Delete an entity and renumber IDs as the editor does. |
 | `get_dialog_script(id)` / `set_dialog_script(id, [script], [options])` | Read/write a dialog's options (`{text, show, say}`) and its dialog-script text. |
 | `set_event(type, id, event, [function])` | Bind a character or inventory event (Look, Interact, Talk, UseInv, …) and add a stub to GlobalScript. |
@@ -188,7 +190,7 @@ call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts eith
 | `read_script(name, [header], [startLine], [endLine])` | Read a module's body or header, or a room script (`room1`), optionally a line range. |
 | `write_script(name, text, [header])` | Replace a module's or room script's full contents. |
 | `edit_script(name, find, replace, [header], [all])` | Exact find/replace (newline-agnostic). |
-| `create_script_module(name, [headerText], [scriptText])` | Create a new `.asc`/`.ash` module. |
+| `create_script_module(name, [headerText], [scriptText])` | Create a new `.asc`/`.ash` module just above GlobalScript, so GlobalScript can use its header. |
 | `compile([name])` | Compile one module (with its preceding headers), a room script (`roomN`, with the room's hotspot/object names) or all modules; returns structured errors/warnings with file and line. |
 | `script_api_lookup(query, [limit])` | Search the built-in API and project headers; returns signatures, source header and `///` docs. |
 
@@ -196,16 +198,16 @@ call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts eith
 | Tool | Description |
 |------|-------------|
 | `list_rooms` | List rooms (number, description, files) and which one the editor has loaded. |
-| `get_room(n, [show])` | Size, backgrounds, colour depth, edges, hotspots, objects, regions, walkable/walk-behind areas, painted area IDs, properties and event bindings; `show` opens the room's editor tab. |
+| `get_room(number, [show])` | Size, backgrounds, colour depth, edges, hotspots, objects, regions, walkable/walk-behind areas, painted area IDs, properties and event bindings; `show` opens the room's editor tab. |
 | `create_room([number], [description])` | Create a blank room. |
-| `set_room_background(n, path\|base64, [background])` | Import a background (or an animation frame). |
-| `draw_room_mask(n, mask, area, shapes, [clear])` | Paint rect/polygon/ellipse/line/fill shapes onto the hotspot, walkable-area, region or walk-behind mask. |
-| `import_room_mask(n, mask, path\|base64)` | Replace a mask with an indexed image (palette index = area). |
-| `get_room_properties(n, entity)` / `set_room_properties(n, entity, properties)` | Properties of the room or a hotspot, object, region, walkable area or walk-behind (by ID or script name). |
-| `create_room_object(n, [properties])` / `delete_room_object(n, object)` | Add or remove a room object. |
-| `render_room(n, [mask], [background])` | Render a background to PNG, optionally overlaying a mask with a colour legend. |
-| `get_mask_pixel(n, mask, x, y)` | The area number at a pixel of a room mask (0 = none). |
-| `set_room_event(n, entity, event, [function])` | Bind a `room`/`hotspot:N`/`object:N`/`region:N` event to a function and add a stub to the room script. |
+| `set_room_background(number, path\|base64, [background])` | Import a background (or an animation frame). |
+| `draw_room_mask(number, mask, area, shapes, [clear])` | Paint rect/polygon/ellipse/line/fill shapes onto the hotspot, walkable-area, region or walk-behind mask. |
+| `import_room_mask(number, mask, path\|base64)` | Replace a mask with an indexed image (palette index = area). |
+| `get_room_properties(number, entity)` / `set_room_properties(number, entity, properties)` | Properties of the room or a hotspot, object, region, walkable area or walk-behind (by ID or script name). |
+| `create_room_object(number, [properties])` / `delete_room_object(number, object)` | Add or remove a room object. |
+| `render_room(number, [mask], [background])` | Render a background to PNG, optionally overlaying a mask with a colour legend. |
+| `get_mask_pixel(number, mask, x, y)` | The area number at a pixel of a room mask (0 = none). |
+| `set_room_event(number, entity, event, [function])` | Bind a `room`/`hotspot:N`/`object:N`/`region:N` event to a function and add a stub to the room script. |
 
 The editor holds one room in memory at a time, so room tools load the requested room in the editor; room
 edits are saved immediately (like script writes) through the editor's own save path, which also compiles
@@ -236,7 +238,7 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | Tool | Description |
 |------|-------------|
 | `build_game([rebuild])` | Compile to `Compiled\Windows\<name>.exe`; returns structured messages. |
-| `run_game([startRoom], [rebuild])` | Build (incrementally) and launch the game windowed, logging to a file; stops any prior game. |
+| `run_game([startRoom], [rebuild])` | Build (incrementally) and launch the game windowed, logging to a file; stops any prior game before building. |
 | `stop_game` | Stop the running game. |
 | `game_status` | Running/exited, pid, exit code, uptime, log path. |
 | `get_game_log([sinceLine], [limit])` | Tail the engine log with a `nextLine` cursor. |
@@ -245,7 +247,7 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | Tool | Description |
 |------|-------------|
 | `runtime_enable_plugin` | Enable the `agsmcp` engine plugin for the project (then `save_project`). |
-| `game_state` | Live snapshot: room, player, characters, objects, mouse, score, interface-enabled, cutscene and paused flags, recent events. |
+| `game_state` | Live snapshot: room, player, characters, objects (views numbered as in the editor), mouse, score, interface-enabled, cutscene and paused flags, recent events. |
 | `game_screenshot` | Capture the running game as a PNG. |
 | `game_click(x, y, [button])` | Move the mouse and click (real input; moves the OS cursor). |
 | `game_process_click(x, y, [mode], [inventory])` | Click at room coordinates in a cursor mode, as a player would (queued; `inventory` selects the item for UseInv). |
@@ -253,7 +255,7 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | `game_hover_name(x, y)` | The name of whatever is at a screen point. |
 | `game_wait_until(condition, [room], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or time out. |
 | `game_get_global_int(index)` / `game_set_global_int(index, value)` | Read/write a legacy GlobalInt. |
-| `game_call_function(name, [args])` | Queue a global-script function (0–2 integer args). |
+| `game_call_function(name, [args])` | Queue a function defined in GlobalScript.asc (0–2 integer args; refused if GlobalScript does not define it). Keep it non-blocking. |
 
 ## Testing
 
@@ -261,7 +263,8 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 - **Smoke test:** `tests\smoke\smoke.ps1` drives a live editor through every tool group over HTTP on a throwaway
   game it creates from the Sierra-style template (compile error and fix, a property round-trip, room authoring,
   `render_room`, `import_sprite`, the audio tools, `build_game`, `run_game`, `game_*`), then reopens the game you had open and
-  deletes the throwaway one. Run it after `build.ps1 -Engine -Deploy -Run`.
+  deletes the throwaway one. Run it after `build.ps1 -Engine -Deploy -Run -Game <Game.agf>`: with no game open, the
+  editor's start-up dialog refuses every tool call.
 
 ## Layout
 

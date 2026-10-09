@@ -165,7 +165,11 @@ namespace AgsMcp.Editor.Mcp
                 return ErrorResponse(id, -32602, "Unknown tool: " + (name ?? "(none)"));
             }
 
-            var args = new ToolArgs(p["arguments"] as JObject);
+            var rawArgs = p["arguments"] as JObject;
+            string unknown = UnknownArguments(tool, rawArgs);
+            if (unknown != null) return Result(id, ToolResult.Error(unknown).ToJson());
+
+            var args = new ToolArgs(rawArgs);
             ToolResult result;
             try
             {
@@ -181,6 +185,21 @@ namespace AgsMcp.Editor.Mcp
                 result = ToolResult.Error(e.GetType().Name + ": " + e.Message);
             }
             return Result(id, result.ToJson());
+        }
+
+        /// <summary>
+        /// Names the arguments a call passed that the tool's schema does not declare, or returns null. Handlers only
+        /// read declared keys, so an undeclared one (id= for number=, name= where the key is a property) would
+        /// otherwise be dropped silently and the call would half-succeed.
+        /// </summary>
+        private static string UnknownArguments(Tool tool, JObject args)
+        {
+            if (args == null || tool.InputSchema == null) return null; // no schema, no contract to check against
+            var declared = (tool.InputSchema["properties"] as JObject)?.Properties().Select(x => x.Name).ToList() ?? new List<string>();
+            var unknown = args.Properties().Select(x => x.Name).Where(n => !declared.Contains(n)).ToList();
+            if (unknown.Count == 0) return null;
+            string takes = declared.Count == 0 ? "no arguments" : "only " + string.Join(", ", declared);
+            return $"Unknown argument{(unknown.Count > 1 ? "s" : "")} {string.Join(", ", unknown.Select(n => "'" + n + "'"))} for {tool.Name}; it takes {takes}.";
         }
 
         private static JObject Result(JToken id, JObject result) =>

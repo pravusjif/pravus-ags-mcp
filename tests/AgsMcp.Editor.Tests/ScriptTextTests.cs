@@ -112,6 +112,20 @@ namespace AgsMcp.Editor.Tests
         }
 
         [Theory]
+        [InlineData("function DBG_Open()\r\n{\r\n}", true)]
+        [InlineData("int DBG_Open(int a, int b) { return a + b; }", true)]
+        [InlineData("  static void DBG_Open () {}", true)]
+        [InlineData("import function DBG_Open();", false)]
+        [InlineData("function x()\r\n{\r\n  DBG_Open();\r\n}", false)]
+        [InlineData("  return DBG_Open(1);", false)]
+        [InlineData("function Ledger::DBG_Open() {}", false)]
+        [InlineData("function DBG_OpenAll() {}", false)]
+        public void DefinesFunction(string text, bool expected)
+        {
+            Assert.Equal(expected, ScriptText.DefinesFunction(text, "DBG_Open"));
+        }
+
+        [Theory]
         [InlineData("a\r\nb", "\n", "a\nb")]
         [InlineData("a\rb", "\n", "a\nb")]
         [InlineData("a\nb", "\r\n", "a\r\nb")]

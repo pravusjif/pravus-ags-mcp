@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using AGS.Types;
 using AgsMcp.Editor.Engine;
@@ -78,7 +79,9 @@ namespace AgsMcp.Editor.Tools
             Title = "Game state",
             Description = "Snapshot of the running game from the engine plugin: current room, player character " +
                           "(position, room, view/loop/frame, walking/animating, inventory), all characters and room " +
-                          "objects, mouse position, score, whether the interface is enabled, cutscene flags and paused flag.",
+                          "objects, mouse position, score, whether the interface is enabled, cutscene flags and paused flag. " +
+                          "View numbers match the editor (1-based, 0 = none). A Display() message box leaves the interface " +
+                          "enabled; an open dialog option list disables it.",
             InputSchema = Schema.Object().Build(),
             Annotations = ToolAnnotations.ReadOnlyTool,
             RunOnUiThread = false,
@@ -214,7 +217,10 @@ namespace AgsMcp.Editor.Tools
                           "blocking speech/walk/cutscene), 'idle' (the player is not walking or animating) or 'ready' (both: " +
                           "the player can act again; use it after game_process_click). The stability window matters because " +
                           "the interface is briefly enabled between consecutive speech lines and dialog steps. Returns whether " +
-                          "the condition was met and the final state.",
+                          "the condition was met and the final state. A Display() box leaves the interface enabled, so 'ready' can be " +
+                          "met while one waits for a click; an open dialog option list keeps it disabled until an option is " +
+                          "clicked. Many MCP clients give up on a call after about 60 s, so keep timeoutMs at 45000 or less and " +
+                          "chain waits.",
             InputSchema = Schema.Object()
                 .Required("condition", Schema.String("What to wait for.", GameWait.ConditionRoom, GameWait.ConditionInterfaceEnabled, GameWait.ConditionIdle, GameWait.ConditionReady))
                 .Optional("room", Schema.Integer("Target room number (required for condition 'room')."))
@@ -295,7 +301,10 @@ namespace AgsMcp.Editor.Tools
             Name = "game_call_function",
             Title = "Call a game script function",
             Description = "Queue a global-script function to run in the game as soon as the engine is able to (script " +
-                          "QueueGameScriptFunction). Pass 0-2 integer arguments. The function must exist in GlobalScript.",
+                          "QueueGameScriptFunction). Pass 0-2 integer arguments. Only functions defined in GlobalScript.asc " +
+                          "are reachable (refused otherwise; a hook in another module needs a GlobalScript wrapper). Keep the " +
+                          "function non-blocking (no Say, Display, Wait or eBlock walks): it runs inside the engine's frame " +
+                          "hook. To read values back, have it System.Log a line and read it with get_game_log.",
             InputSchema = Schema.Object()
                 .Required("name", Schema.String("Global-script function name, e.g. \"my_function\"."))
                 .Optional("args", Schema.ArrayOf(Schema.Integer("An integer argument."), "Up to 2 integer arguments."))
@@ -305,7 +314,16 @@ namespace AgsMcp.Editor.Tools
             Handler = args =>
             {
                 RequireRunning(ctx);
-                var a = new JObject { ["name"] = args.String("name") };
+                string name = args.String("name").Trim();
+                // The engine drops a call to a missing function silently, so check the editor's GlobalScript first.
+                // The running game was built from an earlier save, so this is a guard, not a guarantee.
+                Script global = ctx.RequireGame().ScriptsAndHeaders
+                    .Select(sh => sh.Script)
+                    .FirstOrDefault(s => s != null && s.FileName == Script.GLOBAL_SCRIPT_FILE_NAME);
+                if (global != null && !ScriptText.DefinesFunction(global.Text, name))
+                    throw new ToolException($"GlobalScript.asc defines no function '{name}'. game_call_function only reaches " +
+                                            "GlobalScript functions; define one there (it may forward to a module) and rebuild.");
+                var a = new JObject { ["name"] = name };
                 if (args.Has("args")) a["args"] = args.Array("args");
                 return ToolResult.Json(Ok(client.Send("call_function", a)));
             },

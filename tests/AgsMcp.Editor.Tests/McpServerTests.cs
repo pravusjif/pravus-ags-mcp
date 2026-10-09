@@ -94,6 +94,16 @@ namespace AgsMcp.Editor.Tests
         }
 
         [Fact]
+        public void ToolsCall_UnknownArgument_IsToolErrorNamingTheValidOnes()
+        {
+            var r = Call(CreateServer(), @"{""jsonrpc"":""2.0"",""id"":7,""method"":""tools/call"",""params"":{""name"":""echo"",""arguments"":{""text"":""hi"",""txt"":""x""}}}");
+            Assert.True((bool)r["result"]["isError"]);
+            string message = (string)r["result"]["content"][0]["text"];
+            Assert.Contains("'txt'", message);
+            Assert.Contains("only text", message);
+        }
+
+        [Fact]
         public void ToolsCall_UnknownTool_IsProtocolError()
         {
             var r = Call(CreateServer(), @"{""jsonrpc"":""2.0"",""id"":5,""method"":""tools/call"",""params"":{""name"":""nope""}}");

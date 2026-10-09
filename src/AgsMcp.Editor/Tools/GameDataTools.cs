@@ -125,8 +125,10 @@ namespace AgsMcp.Editor.Tools
 
                 JObject props = args.Has("properties") ? args.Object("properties") : new JObject();
                 object entity = kind.Create(game, props);
-                // Apply any extra properties the caller supplied beyond what creation consumed.
-                List<string> applied = ApplyProperties(game, kind, entity, props, ignoreUnknownAndKeys: true);
+                // Apply any extra properties the caller supplied beyond what creation consumed. The entity already
+                // exists at this point, so keys that fit nothing are reported rather than thrown.
+                var ignored = new List<object>();
+                List<string> applied = ApplyProperties(game, kind, entity, props, ignored);
                 kind.AfterChange?.Invoke(game);
                 return ToolResult.Json(new
                 {
@@ -134,6 +136,7 @@ namespace AgsMcp.Editor.Tools
                     id = kind.IdOf(entity),
                     name = kind.NameOf(entity),
                     applied,
+                    ignored,
                     created = true,
                 });
             },
@@ -388,10 +391,28 @@ namespace AgsMcp.Editor.Tools
             return name.Substring(1).ToUpperInvariant();
         }
 
+        private static string IgnoredReason(EntityKind kind, PropertyDescriptor pd, string key)
+        {
+            if (pd != null) return pd.IsReadOnly ? "read-only" : "not settable";
+            string reason = "no such property";
+            if (kind.NameProperty != null && !string.Equals(key, kind.NameProperty, StringComparison.OrdinalIgnoreCase) &&
+                (key.Equals("ScriptName", StringComparison.OrdinalIgnoreCase) || key.Equals("Name", StringComparison.OrdinalIgnoreCase)))
+                reason += $"; the script name of a {kind.Name} is '{kind.NameProperty}'";
+            return reason;
+        }
+
         private static bool IsCreatable(string type) => EntityRegistry.Get(type).Create != null;
         private static bool IsDeletable(string type) => EntityRegistry.Get(type).Delete != null;
 
-        private static List<string> ApplyProperties(Game game, EntityKind kind, object entity, JObject props, bool ignoreUnknownAndKeys = false)
+        /// <summary>Kinds whose Create reads keys itself (see EntityRegistry), and those keys, which need not be settable properties.</summary>
+        private static readonly string[] KindsReadingCreationKeys = { "globalvariable", "customproperty", "audiocliptype", "audiofolder" };
+        private static readonly string[] CreationKeys = { "Name", "Parent", "Type", "DefaultValue", "Description" };
+
+        /// <summary>
+        /// Applies props to the entity. With <paramref name="ignored"/> (during create) a key that is not a settable
+        /// property is skipped and listed there, unless creation consumed it; otherwise Apply raises the precise error.
+        /// </summary>
+        private static List<string> ApplyProperties(Game game, EntityKind kind, object entity, JObject props, List<object> ignored = null)
         {
             if (props == null || !props.HasValues) return new List<string>();
 
@@ -402,7 +423,13 @@ namespace AgsMcp.Editor.Tools
                 PropertyDescriptor pd = PropertyReflection.Find(descriptors, pair.Key);
                 if (pd == null || !pd.IsBrowsable || pd.IsReadOnly)
                 {
-                    if (ignoreUnknownAndKeys) continue; // during create, extra/creation-only keys are tolerated
+                    if (ignored != null)
+                    {
+                        bool consumed = KindsReadingCreationKeys.Contains(kind.Name) && CreationKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase);
+                        if (!consumed)
+                            ignored.Add(new { key = pair.Key, reason = IgnoredReason(kind, pd, pair.Key) });
+                        continue;
+                    }
                     // otherwise let Apply raise the precise error
                     toApply[pair.Key] = pair.Value;
                     continue;

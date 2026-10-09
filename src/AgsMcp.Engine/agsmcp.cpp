@@ -96,6 +96,10 @@ static int argi(const jm::Value& args, const char* k, int def = 0) {
 
 // ----------------------------------------------------- main-thread handlers
 
+// The engine stores views 0-based with a negative "none" (an object's 0xFFFF reads as -1 through the
+// plugin's short). Report them as the editor and script do (Character.View, Object.View): 1-based, 0 = none.
+static int editor_view(int view) { return view < 0 ? 0 : view + 1; }
+
 static jm::Value character_json(int id, AGSCharacter* c, bool withInv) {
     jm::Value j = jm::Value::MkObj();
     j.set("id", id);
@@ -104,7 +108,7 @@ static jm::Value character_json(int id, AGSCharacter* c, bool withInv) {
     j.set("room", c->room);
     j.set("x", c->x);
     j.set("y", c->y);
-    j.set("view", c->view);
+    j.set("view", editor_view(c->view));
     j.set("loop", (int)c->loop);
     j.set("frame", (int)c->frame);
     j.set("walking", (bool)(c->walking != 0));
@@ -177,7 +181,7 @@ static jm::Value cmd_state() {
         j.set("baseline", (int)o->baseline);
         j.set("visible", (int)(unsigned char)o->on);
         j.set("moving", (int)o->moving);
-        j.set("view", (int)o->view);
+        j.set("view", editor_view(o->view));
         j.set("loop", (int)o->loop);
         j.set("frame", (int)o->frame);
         objs.arr.push_back(j);

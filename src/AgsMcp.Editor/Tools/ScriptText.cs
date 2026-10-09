@@ -1,4 +1,5 @@
 using System;
+using System.Text.RegularExpressions;
 
 namespace AgsMcp.Editor.Tools
 {
@@ -95,6 +96,19 @@ namespace AgsMcp.Editor.Tools
         {
             if (string.IsNullOrEmpty(text)) return text ?? string.Empty;
             return text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", newline);
+        }
+
+        /// <summary>
+        /// True when the script defines a plain function of that name at the start of a line
+        /// (<c>function name(</c>, <c>int name(</c>, <c>static void name(</c>, ...). Import lines, calls and
+        /// struct member functions (<c>Type::name</c>) do not count.
+        /// </summary>
+        public static bool DefinesFunction(string text, string name)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(name)) return false;
+            var definition = new Regex(@"^[ \t]*(?:(?:static|protected)[ \t]+)*(?!import\b|return\b|else\b)[A-Za-z_]\w*[ \t]*\*?[ \t]+" +
+                                       Regex.Escape(name) + @"[ \t]*\(", RegexOptions.Multiline);
+            return definition.IsMatch(text);
         }
     }
 }

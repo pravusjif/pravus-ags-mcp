@@ -147,7 +147,8 @@ namespace AgsMcp.Editor.Tools
             Name = "create_script_module",
             Title = "Create script module",
             Description = "Create a new script module (a .asc body and .ash header pair), write it to disk and add it to " +
-                          "the project at the bottom of the module list. If the name is taken a number is appended; the " +
+                          "the project just above GlobalScript, so GlobalScript and the modules below it can use its header (in a project " +
+                          "with script folders it goes at the bottom; 'position' says where it landed). If the name is taken a number is appended; the " +
                           "actual name is returned. The module is registered in the project; call save_project to persist " +
                           "it to Game.agf. (It appears in the editor's project tree after the editor next refreshes it.)",
             InputSchema = Schema.Object()
@@ -171,6 +172,7 @@ namespace AgsMcp.Editor.Tools
                     name = ModuleName(created),
                     header = created.Header?.FileName,
                     script = created.Script?.FileName,
+                    position = game.ScriptsAndHeaders.ToList().IndexOf(created),
                     created = true,
                 });
             },
@@ -352,7 +354,10 @@ namespace AgsMcp.Editor.Tools
 
         /// <summary>
         /// Creates a module at the model level: writes the .asc/.ash pair to disk and adds it to the
-        /// root script folder (so it shows up in ScriptsAndHeaders and compiles). It deliberately does
+        /// root script folder (so it shows up in ScriptsAndHeaders and compiles), just above GlobalScript:
+        /// a script only sees the headers of modules above it, and the editor's own "New script" appends
+        /// at the bottom, which leaves the module invisible to GlobalScript. In a project with script
+        /// folders it appends, as the editor does. It deliberately does
         /// not refresh the editor's project tree, because that WinForms control is owned by the editor's
         /// main-window thread, not the plugin's dispatcher thread.
         /// </summary>
@@ -364,7 +369,16 @@ namespace AgsMcp.Editor.Tools
             header.SaveToDisk();
             script.SaveToDisk();
             var pair = new ScriptAndHeader(header, script);
-            game.RootScriptFolder.Items.Add(pair);
+            // Insert through the flat list (FolderListHybrid), which updates both it and the root folder at the same
+            // index; inserting into RootScriptFolder.Items alone leaves the flat list (the order list_scripts reports)
+            // with the module appended. The two indexes only agree when there are no subfolders,
+            // so with script folders keep the editor's behaviour and append.
+            ScriptsAndHeaders all = game.ScriptsAndHeaders;
+            int global = -1;
+            for (int i = 0; i < all.Count; i++)
+                if (all[i].Script != null && all[i].Script.FileName == Script.GLOBAL_SCRIPT_FILE_NAME) { global = i; break; }
+            if (global >= 0 && game.RootScriptFolder.SubFolders.Count == 0) all.AddAt(pair, global);
+            else game.RootScriptFolder.Items.Add(pair);
             game.FilesAddedOrRemoved = true;
             return pair;
         }

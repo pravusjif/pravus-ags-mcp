@@ -114,7 +114,9 @@ if ($Deploy) {
 }
 
 if ($Run) {
-    $gameArg = if ($Game -and (Test-Path $Game)) { "`"$Game`"" } else { "" }
-    Start-Process (Join-Path $AgsDir "AGSEditor.exe") -ArgumentList $gameArg -WorkingDirectory $AgsDir
+    $editor = Join-Path $AgsDir "AGSEditor.exe"
+    # Start-Process rejects an empty -ArgumentList, so pass it only when there is a game to open.
+    if ($Game -and (Test-Path $Game)) { Start-Process $editor -ArgumentList "`"$Game`"" -WorkingDirectory $AgsDir }
+    else { Start-Process $editor -WorkingDirectory $AgsDir }
     Write-Host "Started the AGS editor. MCP endpoint: http://127.0.0.1:7471/mcp" -ForegroundColor Green
 }

@@ -82,6 +82,13 @@ namespace AgsMcp.Editor.Tools
                 int? startRoom = args.Has("startRoom") ? (int?)args.Int("startRoom") : null;
                 bool rebuild = args.Bool("rebuild", false);
 
+                // Stop before building: the running game holds its exe (and agsmcp.dll) open, so the build could not replace them.
+                if (runner.IsRunning)
+                {
+                    runner.Stop();
+                    WaitUntilWritable(EditorInternals.WindowsBuildExePath(), TimeSpan.FromSeconds(5));
+                }
+
                 CompileMessages result = EditorInternals.CompileGameFull(rebuild);
                 var structured = StructureMessages(result, out int errors, out int warnings);
                 string exe = EditorInternals.WindowsBuildExePath();
@@ -97,8 +104,6 @@ namespace AgsMcp.Editor.Tools
                         messages = structured,
                     });
                 }
-
-                if (runner.IsRunning) runner.Stop();
 
                 string runDir = Path.Combine(Path.GetTempPath(), "ags-mcp-run");
                 Directory.CreateDirectory(runDir);
@@ -227,6 +232,26 @@ namespace AgsMcp.Editor.Tools
             using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var sr = new StreamReader(fs))
                 return sr.ReadToEnd();
+        }
+
+        /// <summary>
+        /// Waits until a stopped game's exe can be opened for writing. Windows can keep the image locked for a
+        /// moment after the process has exited, and a build in that window fails to replace the exe.
+        /// </summary>
+        private static void WaitUntilWritable(string path, TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (File.Exists(path))
+            {
+                try
+                {
+                    using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) return;
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { return; }
+                if (DateTime.UtcNow >= deadline) return;
+                System.Threading.Thread.Sleep(100);
+            }
         }
 
         private static List<object> StructureMessages(CompileMessages messages, out int errors, out int warnings)
