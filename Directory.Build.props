@@ -6,7 +6,7 @@
   <PropertyGroup>
     <LangVersion>7.3</LangVersion>
     <Nullable>disable</Nullable>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
   </PropertyGroup>
 
   <!-- C# projects only: CMake's toolchain probe (VCTargetsPath.vcxproj) also loads this file, and it has no AgsDir. -->
