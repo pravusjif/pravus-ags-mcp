@@ -7,7 +7,7 @@ These are the instructions for any coding agent working on this repo. `CLAUDE.md
 **Before you change behaviour, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).** It records the architecture, the design decisions and their reasons, known gaps and verified AGS facts. When you change behaviour or verify a new AGS fact, update it. The tool reference is in [README.md](README.md#tools).
 
 ## Workflow
-- Commit finished, verified work on `main`. The remote is `origin` (`git@github.com:pravusjif/ags-mcp-api.git`). Push only when the user asks. GPG signing is turned off in this repo's local git config.
+- Commit finished, verified work on `main`. The remote is `origin` (`git@github.com:pravusjif/pravus-ags-mcp.git`). Push only when the user asks. GPG signing is turned off in this repo's local git config.
 - The dev loop is `.\build.ps1 -Test -Deploy -Run`. The editor locks `AGS.Plugin.Mcp.dll`, so close it before deploying (`-StopEditor` kills it, losing unsaved work), and restart it after every plugin change.
 - Plans can be run unattended with AI Plan Loop (https://github.com/pravusjif/ai-plan-loop), which is not part of this repo. Run it from wherever it is cloned, against a plan file here: `python <ai-plan-loop>\plan_loop.py <this repo>\docs\<plan>.md [--agent ...]`. It finds the repo from the plan's location. A session started by it gets `AI_PLAN_LOOP=1` and must end every turn with a `LOOP_STATUS:` line.
 - To verify against the live editor, call `http://127.0.0.1:7471/mcp` with `Invoke-WebRequest` or with the MCP Inspector CLI. Both commands are in the architecture doc's Testing section. When a call fails, read `%APPDATA%\AGS-MCP\plugin.log`.

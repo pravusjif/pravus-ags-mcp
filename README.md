@@ -32,7 +32,7 @@ works without admin rights. **Close the AGS editor before installing**: it locks
 ### One-line installer (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/pravusjif/ags-mcp-api/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/pravusjif/pravus-ags-mcp/main/install.ps1 | iex
 ```
 
 It downloads the latest release, finds your AGS 3.6 editor, copies both DLLs next to `AGSEditor.exe` and prints
@@ -40,7 +40,7 @@ the client setup. It finds an editor installed with the AGS installer, or one th
 or to pass any other option, run it like this:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/pravusjif/ags-mcp-api/main/install.ps1))) -AgsDir C:\AGS-3.6.2
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/pravusjif/pravus-ags-mcp/main/install.ps1))) -AgsDir C:\AGS-3.6.2
 ```
 
 | Option | What it does |
@@ -55,7 +55,7 @@ An AGS folder under `Program Files` needs an elevated (Administrator) PowerShell
 
 ### Manual install
 
-1. Download `ags-mcp-<version>.zip` from this repo's [Releases](https://github.com/pravusjif/ags-mcp-api/releases) and unpack it.
+1. Download `ags-mcp-<version>.zip` from this repo's [Releases](https://github.com/pravusjif/pravus-ags-mcp/releases) and unpack it.
 2. Copy `AGS.Plugin.Mcp.dll` into the folder that contains `AGSEditor.exe`. For the `game_*` player-simulation
    tools, also copy `agsmcp.dll` into the same folder. (Or, from the unpacked zip, run
    `powershell -ExecutionPolicy Bypass -File .\install.ps1 -AgsDir <folder>`, which does the same.)
