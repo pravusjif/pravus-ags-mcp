@@ -128,6 +128,10 @@ stop
 
 Speaker names are the character script names without the leading `c`. `return` goes back to the option list, `stop` ends the dialog. Start it from a handler with `dGuard.Start();`. A `narrator: text` line shows a modal box (like `Display`); use a character line when you want it non-blocking when checking in the running game.
 
+A line indented with spaces inside an entry point is script code, so `  if (doorOpen) cGuard.Say("It's open now.");` or a call to a GlobalScript function can stand in for a speech line that must depend on state. `set_dialog_script` without `options` keeps the existing options.
+
+For a plain choice inside a room interaction, use a dialog as a menu: create it, give it the options, and call `int choice = dChoice.DisplayOptions(eSayNever);`, which returns the chosen option's number at once and runs none of the dialog script. `dX.Start()` instead runs only after the current script function has finished, and returns nothing.
+
 ## Common pitfalls
 
 - `edit_script` fails when `find` matches twice. Include a comment line or the function header in `find`.
@@ -138,3 +142,8 @@ Speaker names are the character script names without the leading `c`. `return` g
 - `Display()` blocks until clicked; in the running game use `game_click` to dismiss it, and consider `player.Say` for lines that do not need a modal box.
 - Exit regions fire the moment a character stands on them, including the spawn position after `ChangeRoom`. Spawn a few pixels away from the exit region.
 - Objects default to `Baseline 0` (= use their y). Set `Baseline` on a wall-mounted object (a picture, an open cabinet door) so characters walking below do not draw behind it.
+- **Inside one script, define a function above its first call**, even when the header imports it. Otherwise the full `compile` fails with "Already referenced name 'X' as import; you must define it before using it". The same goes for a module's `static` struct functions. `compile name=roomN` does not show this; only the full `compile` does.
+- If the compiler says "structure required on left side of '.'" on a chained call such as `name.Substring(0, 1).LowerCase()`, split it into one call per statement.
+- A room with two or more backgrounds cycles through them unless `room_Load` calls `SetBackgroundFrame(0)` (or the frame it should show).
+- A hotspot's `WalkToPoint` also redirects every Walk-mode click on that hotspot to the point. Give walk-to points to things the player must stand beside (furniture, doors), not to floor areas or exit strips. Whether a Look click walks there first depends on the game's settings, so turn the player with `FaceLocation` in a Look handler when it matters.
+- Colour properties (GUI `BackgroundColor`, `TextColor`, …) are AGS colour numbers, not RGB: in script use `Game.GetColorFromRGB(r, g, b)`; through `set_properties` in a 16- or 32-bit game pass the number it would return, `((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)`. A GUI with a `BackgroundImage` shows the image, and its `BackgroundColor` has no visible effect.

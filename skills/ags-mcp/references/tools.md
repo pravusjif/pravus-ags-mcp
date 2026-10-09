@@ -1,6 +1,15 @@
 # ags MCP tool reference
 
-Argument shapes and quirks, grouped by area. `N` is a room number. Where a tool "saves", it writes the file immediately; everything else lives in memory until `save_project`.
+Argument shapes and quirks, grouped by area. Where a tool "saves", it writes the file immediately; everything else lives in memory until `save_project`.
+
+The rows use a short form; the argument keys are:
+
+- `N` is the room number, passed as **`number`**, on every room tool (`get_room number=3`).
+- Room entities go in `entity` (`hotspot:2`, `hDoor`), on both `get_room_properties` and `set_room_properties`.
+- Game entities are `type` plus `id` (numeric ID or script name).
+- Scripts are named with `name`. `write_script` takes the body as `text`; `edit_script` takes `find` and `replace`.
+
+A key a tool does not take is refused with the list of the ones it does.
 
 ## Project
 
@@ -18,10 +27,10 @@ Argument shapes and quirks, grouped by area. `N` is a room number. Where a tool 
 |---|---|
 | `get_properties type id` | `id` is the numeric ID or script name. Returns every property with `type`, `readOnly`, `value` and, for characters and inventory, the `events` with bound functions. |
 | `set_properties type id properties` | Enums by name or number. Script names are uniqueness-checked (including derived macros). Needs `save_project`. |
-| `create_entity type [properties]` | Auto-names (`cChar3`, `iInvItem4`) unless `Name`/`ScriptName` is given. Inventory: `{Name, Description, Image, CursorImage, HotspotX, HotspotY}`. Character: `{ScriptName, RealName, NormalView, IdleView, IdleDelay, StartingRoom, StartX, StartY, SpeechColor, Solid, Clickable, DiagonalLoops}`. `globalvariable`, `customproperty`, `audiocliptype` and `audiofolder` need `Name` (`audiofolder` also takes `Parent`). Audio clips come from `import_audio`, not here. Returns the new `id`. |
+| `create_entity type [properties]` | Auto-names (`cChar3`, `iInvItem4`, `dDialog1`) unless the script name is in `properties`: `ScriptName` for characters, `Name` for inventory items, dialogs, GUIs and views. Properties that fit nothing come back in `ignored` with the reason; check it. Inventory: `{Name, Description, Image, CursorImage, HotspotX, HotspotY}`. Character: `{ScriptName, RealName, NormalView, IdleView, IdleDelay, StartingRoom, StartX, StartY, SpeechColor, Solid, Clickable, DiagonalLoops}`. `globalvariable`, `customproperty`, `audiocliptype` and `audiofolder` need `Name` (`audiofolder` also takes `Parent`). Audio clips come from `import_audio`, not here. Returns the new `id`. |
 | `delete_entity type id` | Renumbers higher IDs like the editor does, so re-read IDs afterwards. |
 | `set_event type id event [function]` | `type` is `character` or `inventory`. Events: characters `Look, Interact, Talk, UseInv, AnyClick, PickUp`; inventory `Look, Interact, Talk, UseInv, OtherClick`. Adds a stub to `GlobalScript.asc` named `<scriptName>_<event>` and binds it. Then `edit_script GlobalScript` to fill the stub. |
-| `get_dialog_script id` / `set_dialog_script id [script] [options]` | `options` is `[{text, show, say}]` (numbered from 1 in order). See scripting.md for the dialog-script format. |
+| `get_dialog_script id` / `set_dialog_script id [script] [options]` | `options` is `[{text, show, say}]` (numbered from 1 in order). Without `options` the existing options stay. See scripting.md for the dialog-script format. |
 
 ## Scripts
 
@@ -31,7 +40,7 @@ Argument shapes and quirks, grouped by area. `N` is a room number. Where a tool 
 | `read_script name [header] [startLine endLine]` | `name` is a module (`GlobalScript`, `KeyboardMovement`) or `roomN`. `header=true` reads the `.ash`. |
 | `write_script name text [header]` | Replaces the whole file and saves. Use for new room scripts after `set_room_event` has added the stubs (keep the stub names). |
 | `edit_script name find replace [header] [all]` | Exact, newline-agnostic find/replace; `find` must occur exactly once unless `all=true` (include a comment or the function header to make it unique). Saves. |
-| `create_script_module name [headerText scriptText]` | New `.asc`/`.ash` pair. Needs `save_project` to be recorded in `Game.agf`. |
+| `create_script_module name [headerText scriptText]` | New `.asc`/`.ash` pair, placed just above GlobalScript so GlobalScript can use its header (a script sees only the headers above it). Needs `save_project` to be recorded in `Game.agf`. |
 | `compile [name]` | No name: all modules. `name=roomN` compiles the room script with its generated header (hotspot/object names). Regenerates the auto-generated header first, so names from a `create_entity`/`create_view` made moments ago resolve. Returns `{ok, errors, warnings, messages:[{severity, script, line, message}]}`. |
 | `script_api_lookup query` | Signatures and docs from the built-in header and project headers. It can list functions the project's Script API level hides, so a listed name is not a guarantee it compiles. |
 
@@ -42,9 +51,9 @@ All room tools load the room in the editor (switching away from whatever was loa
 | Tool | Notes |
 |---|---|
 | `list_rooms` | Numbers, descriptions, file names, which room is loaded. |
-| `get_room N [show]` | Size, edges, painted area IDs per mask (`painted`), all hotspot/object/region/walkable/walk-behind slots with names and bound events, room events. `show=true` opens the editor tab. Slots exist whether used or not: 50 hotspots, 16 of the others; ID 0 is "none". |
+| `get_room N [show]` | About 4k tokens a call, because it lists every slot. Size, edges, painted area IDs per mask (`painted`), all hotspot/object/region/walkable/walk-behind slots with names and bound events, room events. `show=true` opens the editor tab. Slots exist whether used or not: 50 hotspots, 16 of the others; ID 0 is "none". |
 | `create_room [number] [description]` | Blank black room at game resolution. Lowest free number by default. Rooms cannot be deleted. |
-| `set_room_background N path\|base64 [background]` | Frame 0 = main background. A different size resizes the room and clears all masks, so import the background **before** painting masks. Smaller images are padded. |
+| `set_room_background N path\|base64 [background]` | Frame 0 = main background. A different size resizes the room and clears all masks, so import the background **before** painting masks; re-importing a frame of the same size keeps them. `background=1` (then 2, …) adds the next frame. Smaller images are padded. |
 | `draw_room_mask N mask area shapes [clear]` | `mask`: `hotspots`, `walkableareas`, `walkbehinds`, `regions`. `area` 0 erases. Shapes in room pixels: `{type:"rect", x, y, width, height}`, `{type:"polygon", points:[[x,y],…]}`, `{type:"ellipse", x, y, rx, ry}` (centre + radii), `{type:"line", x1,y1,x2,y2}`, `{type:"fill", x, y}`. Later shapes overwrite earlier ones, so paint big areas first. Returns `paintedAreas`. |
 | `import_room_mask N mask path\|base64` | Indexed image, pixel value = area number. |
 | `get_room_properties N entity` / `set_room_properties N entity properties` | `entity`: `room`, `hotspot:K`, `object:K`, `region:K`, `walkablearea:K`, `walkbehind:K`, or a script name (`hDoor`, `oKey`). Hotspot: `{Name, Description, WalkToPoint:"x,y"}`. Walk-behind: `{Baseline}`. Region: `{LightLevel, UseColourTint}`. Room: `{Description, LeftEdgeX, RightEdgeX, TopEdgeY, BottomEdgeY}`. |
@@ -81,7 +90,7 @@ See audio.md for making the sounds. Clips live in `Game.agf`, so `save_project` 
 | Tool | Notes |
 |---|---|
 | `build_game [rebuild]` | Full build to `Compiled\Windows\<name>.exe`; structured messages like `compile`. |
-| `run_game [startRoom] [rebuild]` | Builds incrementally from **disk** (so `save_project` first), launches windowed, stops a previous instance. `startRoom` skips the intro rooms. |
+| `run_game [startRoom] [rebuild]` | Stops a running game, builds incrementally from **disk** (so `save_project` first) and launches windowed. `startRoom` skips the intro rooms, and also becomes the room `RestartGame` returns to. |
 | `stop_game` / `game_status` / `get_game_log [sinceLine] [limit]` | The engine log shows script errors with line numbers when the game crashes or quits unexpectedly. |
 | `runtime_enable_plugin` | Once per project, then `save_project`; required for the `game_*` tools. |
 
@@ -91,12 +100,12 @@ See playtesting.md for the loop. Quick shapes:
 
 | Tool | Notes |
 |---|---|
-| `game_state` | `room`, `interfaceEnabled`, `player{x,y,room,walking,inventory:[{item,count}],activeInv}`, `characters[]`, `objects[{id,x,y,sprite,visible,view,frame}]`, `recentEvents` (`enter:N`/`leave:N`). `animating` reflects `Animate()` only, not idle views. |
+| `game_state` | View numbers are the editor's. `room`, `interfaceEnabled`, `player{x,y,room,walking,inventory:[{item,count}],activeInv}`, `characters[]`, `objects[{id,x,y,sprite,visible,view,frame}]`, `recentEvents` (`enter:N`/`leave:N`). `animating` reflects `Animate()` only, not idle views. |
 | `game_process_click x y [mode] [inventory]` | Room coordinates, cursor mode number (templates: 0 Walk, 1 Look, 2 Interact, 3 Talk, 4 UseInv). Queued; returns at once. |
 | `game_click x y [button]` | Raw screen click; this is what dismisses a `Display()` box or presses a GUI button. |
-| `game_hover_name x y` | What a click there would hit. Check before clicking near the player. |
-| `game_wait_until condition [room] [timeoutMs] [stableMs]` | `ready` (interface enabled and player idle, stable for `stableMs`), `room`, `idle`, `interfaceEnabled`. Returns `met` and the final `state`. |
+| `game_hover_name x y` | What a click there would hit. Check before clicking near the player. It does not move the mouse. |
+| `game_wait_until condition [room] [timeoutMs] [stableMs]` | `ready` (interface enabled and player idle, stable for `stableMs`), `room`, `idle`, `interfaceEnabled`. Returns `met` and the final `state`. Keep `timeoutMs` at 45000 or less and chain waits: many clients abandon a call after about 60 s. |
 | `game_screenshot` | PNG of the window. |
-| `game_key key` | `"Tab"`, `"Enter"`, `"Escape"`, `"Space"`, `"F5"`, arrows, letters, digits. In the standard templates Tab opens the inventory and Escape the control panel. |
-| `game_call_function name [args]` | Runs a GlobalScript function with up to two int args; handy for test hooks. |
+| `game_key key` | `"Tab"`, `"Enter"`, `"Escape"`, `"Space"`, `"F5"`, letters, digits. In the standard templates Tab opens the inventory and Escape the control panel. Arrow keys and F7 are unreliable (they can arrive as other keys); call the script function they would trigger instead. Letters do not reach a GUI text box. |
+| `game_call_function name [args]` | Runs a function defined in `GlobalScript.asc` with up to two int args; refused if GlobalScript does not define it (a hook in another module needs a GlobalScript wrapper). Keep it non-blocking: no `Say`, `Display`, `Wait` or `eBlock`. |
 | `game_get_global_int` / `game_set_global_int` | Legacy GlobalInts only; exported script variables are not reachable this way. |

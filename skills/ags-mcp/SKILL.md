@@ -15,11 +15,12 @@ The `ags` MCP server lives inside the running AGS 3.6 editor and edits **the pro
 
 ## Before anything else
 
-1. Call `project_info`. It tells you the game name, folder, resolution, colour depth, player character and counts. If the tools are missing, either the editor is not running with the plugin or your MCP client is not connected to it: the server is at `http://127.0.0.1:7471/mcp` (Streamable HTTP), and the editor's **MCP > Client setup** shows the setup for common clients.
+1. Call `project_info`. It tells you the game name, folder, resolution, colour depth, player character and counts. If the tools are missing, either the editor is not running with the plugin or your MCP client is not connected to it: the server is at `http://127.0.0.1:7471/mcp` (Streamable HTTP), and the editor's **MCP > Client setup** shows the setup for common clients. If every call says the editor is showing a dialog box, ask the user to close it; no tool can.
 2. Read what the change touches before changing it: `list_rooms`, `get_room N` for the rooms involved, `read_script roomN` and the parts of `GlobalScript` you will depend on, `list_entities character|inventory|view|dialog`, `get_properties` on the entities you will edit. Names, coordinates, flags, sprite numbers and coding conventions all come from there; match them.
 3. Keep the two persistence tiers in mind, because forgetting one loses work:
    - **Written immediately:** every room tool (`set_room_background`, `draw_room_mask`, `set_room_properties`, `create_room_object`, `set_room_event`, …) saves its `.crm`; `write_script` / `edit_script` / `create_script_module` save the script file.
    - **Needs `save_project`:** everything in `Game.agf`: sprites, views, audio clips, characters, inventory items, dialogs, global variables, entity properties, `runtime_enable_plugin`. Call `save_project` at the end of any batch that touched these, and before `run_game` (which builds from disk).
+   - **Change scripts only through the script tools** (`write_script`, `edit_script`). The editor keeps its own copy of every module, and of a room script once it has loaded it, and compiles and saves that copy: a script edited on disk with another tool is not compiled, and the next save writes the old text back over it.
    - A room tool returns `save.saved=false` with compiler messages when the room's script does not compile. The edit is still in the editor; fix the script, then run any room tool or `save_project` to write it.
 
 ## The general loop
@@ -32,7 +33,7 @@ The `ags` MCP server lives inside the running AGS 3.6 editor and edits **the pro
 
 ## Recipes
 
-**A new room.** Design the hotspots, objects, exits and stand points first. Then: art as PNGs at the game's resolution ([references/pixel-art.md](references/pixel-art.md)) → `create_room` → `set_room_background` (before any mask; a size change clears masks) → `import_sprite` per sprite (note the numbers) → `draw_room_mask` for the walkable floor (one polygon), one hotspot area per interactive thing, walk-behinds (then their `Baseline`) and regions for exits and triggers → `set_room_properties` to name hotspots (`Name`, `Description`, `WalkToPoint`) → `create_room_object` → `set_room_event` for every handler → fill the stubs (`edit_script roomN` or `write_script roomN` keeping the stub names) → connect it: the neighbouring room's exit `ChangeRoom`s into it and its exit leads back. Spawn the player *outside* the exit region of the room they arrive in, or it fires at once.
+**A new room.** Design the hotspots, objects, exits and stand points first. Then: art as PNGs at the game's resolution ([references/pixel-art.md](references/pixel-art.md)) → `create_room` → `set_room_background` (before any mask; a size change clears masks) → `import_sprite` per sprite (note the numbers) → `draw_room_mask` for the walkable floor (one polygon), one hotspot area per interactive thing, walk-behinds (then their `Baseline`) and regions for exits and triggers → `set_room_properties` to name hotspots (`Name`, `Description`, `WalkToPoint`) → `create_room_object` → `set_room_event` for every handler, before the script has them (every room save warns about each handler in the script that is not bound yet, and the warnings repeat on every call) → fill the stubs (`edit_script roomN` or `write_script roomN` keeping the stub names) → connect it: the neighbouring room's exit `ChangeRoom`s into it and its exit leads back. Spawn the player *outside* the exit region of the room they arrive in, or it fires at once.
 
 **Something new in an existing room** (object, hotspot, trigger). `get_room N` and `render_room N` (plus `mask=hotspots`/`walkableareas`) first, so the new thing fits the existing layout and IDs. Add art and masks only where needed, bind events, add handlers next to the existing ones, and keep existing handlers working.
 
@@ -50,6 +51,7 @@ The `ags` MCP server lives inside the running AGS 3.6 editor and edits **the pro
 - **Objects are hit-tested per pixel.** Thin or mostly transparent sprites are hard to click; give pick-ups a few solid pixels.
 - **Script-name macros:** `create_view name=vFire` gives the script constant `VFIRE`; a character `cGuard` gives `GUARD`. A view and a character must not derive the same macro.
 - **Cross-room state:** use an exported global (`bool doorOpen; export doorOpen;` in `GlobalScript.asc`, `import bool doorOpen;` in `GlobalScript.ash`) or `create_entity globalvariable`. `script_api_lookup` lists functions the project's Script API level may have disabled; the compiler, not the lookup, decides what exists.
+- **Room edges** (`LeftEdgeX`, …) fire only when the player crosses them, and a walk stops at the last walkable pixel. Put an edge at least 2 px inside the walkable area, or it never fires.
 - **Regions as exits:** bind `region:K WalksOnto` to `player.ChangeRoom(...)`, and give the same spot a hotspot with `Interact` so a click works too.
 
 ## Verifying in the user's game
@@ -67,6 +69,8 @@ Then play the changed interaction in the running game with the `game_*` tools ([
 - each step to play, with its coordinates, cursor mode and inventory ID;
 - the exact assertion after each step (for example "`objects[2].visible` is false", "`player.inventory` contains item 3");
 - an instruction to read `references/playtesting.md` first, to call `stop_game` at the end, and not to edit the project. The subagent may only add a temporary aid if you allow it, and must then remove it.
+
+Keep each subagent to one task of about 8–14 checks; a longer run fills its own context and takes far longer. When a test continues a previous one, name the save to load (see playtesting.md) instead of replaying the path to it.
 
 Ask it to report back briefly: pass or fail for each assertion with the observed values, any `get_game_log` errors, and a description of anything unexpected. It should not paste raw state dumps. Fix failures yourself, then start a new subagent to play the test again.
 
