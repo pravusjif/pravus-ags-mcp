@@ -32,7 +32,7 @@ namespace AgsMcp.Editor.Tools
             Schema.String("Entity type: " + string.Join(", ", EntityRegistry.TypeNames) + ".");
 
         private static JObject IdProp() =>
-            Schema.String("The entity's numeric ID or its script name. (For globalvariable/customproperty, the name; for audiocliptype, the TypeID or name.)");
+            Schema.String("The entity's numeric ID or its script name. (For globalvariable/customproperty/audiofolder, the name; for audiocliptype, the TypeID or name.)");
 
         private static Tool ListEntities(ToolContext ctx) => new Tool
         {
@@ -97,6 +97,7 @@ namespace AgsMcp.Editor.Tools
                 EntityKind kind = EntityRegistry.Get(args.String("type"));
                 object entity = EntityRegistry.Resolve(kind, game, args.Raw["id"]);
                 List<string> changed = ApplyProperties(game, kind, entity, args.Object("properties"));
+                if (changed.Count > 0) kind.AfterChange?.Invoke(game);
                 return ToolResult.Json(new { type = kind.Name, id = kind.IdOf(entity), changed });
             },
         };
@@ -107,12 +108,12 @@ namespace AgsMcp.Editor.Tools
             Title = "Create entity",
             Description = "Create a new entity and register it in the project. Creatable types: " +
                           string.Join(", ", EntityRegistry.TypeNames.Where(IsCreatable)) + ". " +
-                          "globalvariable, customproperty and audiocliptype require a 'Name' in properties; others are auto-named. " +
-                          "Audio clips come from import_audio. " +
+                          "globalvariable, customproperty, audiocliptype and audiofolder require a 'Name' in properties; others are auto-named. " +
+                          "An audiofolder also takes an optional 'Parent' folder name (default: the root). Audio clips come from import_audio. " +
                           "Any other given properties are applied to the new entity. Call save_project to persist.",
             InputSchema = Schema.Object()
                 .Required("type", TypeProp())
-                .Optional("properties", Schema.AnyObject("Initial property values. 'Name' is required for globalvariable/customproperty/audiocliptype."))
+                .Optional("properties", Schema.AnyObject("Initial property values. 'Name' is required for globalvariable/customproperty/audiocliptype/audiofolder."))
                 .Build(),
             Annotations = ToolAnnotations.Mutating,
             Handler = args =>
@@ -126,6 +127,7 @@ namespace AgsMcp.Editor.Tools
                 object entity = kind.Create(game, props);
                 // Apply any extra properties the caller supplied beyond what creation consumed.
                 List<string> applied = ApplyProperties(game, kind, entity, props, ignoreUnknownAndKeys: true);
+                kind.AfterChange?.Invoke(game);
                 return ToolResult.Json(new
                 {
                     type = kind.Name,
@@ -156,6 +158,7 @@ namespace AgsMcp.Editor.Tools
                 object entity = EntityRegistry.Resolve(kind, game, args.Raw["id"]);
                 string id = kind.IdOf(entity), name = kind.NameOf(entity);
                 kind.Delete(game, entity);
+                kind.AfterChange?.Invoke(game);
                 return ToolResult.Json(new { type = kind.Name, id, name, deleted = true });
             },
         };
@@ -422,7 +425,7 @@ namespace AgsMcp.Editor.Tools
                     if (unchanged) continue; // no-op, skip
                 }
 
-                toApply[pd.Name] = pair.Value;
+                toApply[pd.Name] = kind.PrepareProperty != null ? kind.PrepareProperty(game, entity, pd.Name, pair.Value) : pair.Value;
             }
             return PropertyReflection.Apply(entity, toApply);
         }

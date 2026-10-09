@@ -8,7 +8,7 @@ There are no sound assets to fetch, so synthesise them: numpy writes a WAV in a 
 
 1. **Look at what exists:**
    - `list_entities audioclip`, plus `get_properties audioclip <name>` on one clip, to see the naming, folders and types in use.
-   - `list_entities audiocliptype` (usually 1 Ambient Sound, 2 Music, 3 Sound).
+   - `list_entities audiocliptype` (usually 1 Ambient Sound, 2 Music, 3 Sound) and `list_entities audiofolder`, plus `get_properties audiofolder <name>` for each folder's defaults.
    - `find_usages` on a clip, to see how the scripts play it.
 2. **Write one seeded generator script per family of sounds**, beside its output in the game's `Audio/` folder (for example `Audio/effects_gen.py` writes `Audio/fx_*.wav`). Seed it (`sfx.seed(...)`) so the sounds regenerate the same way, and keep it so they can be tweaked later.
 3. **Check every clip in the script:** `check_oneshot(x)` for one-shots and `check_loop(x)` for loops. Then look at it: `python sfx.py info Audio/*.wav` for levels, ends and seams, and `python sfx.py preview Audio/sheet.png Audio/fx_*.wav` for a spectrogram you can open. You cannot listen, so these are your ears: a knock should show short broadband strikes, a hum a steady low line, a melody steps between lines.
@@ -81,6 +81,10 @@ A consistent set matters more than the exact numbers: generate siblings in one s
 ## Audio types, folders and channels
 
 - **Folder and type defaults.** A clip's **type** decides its channel pool and default behaviour. New clips take the folder's `DefaultType`/`DefaultBundlingType`, so import into the folder that matches (in the default templates: `Sounds` → Sound, `Music` → Music, the root → Ambient Sound), or pass `type`.
+- **Folders set runtime defaults too.** A clip whose volume, priority or repeat is `Inherit` plays with its folder's `DefaultVolume`/`DefaultPriority`/`DefaultRepeat`. Group clips that should share these:
+  - `create_entity audiofolder {"Name": "Footsteps", "Parent": "Sounds", "DefaultVolume": 60}`, then `import_audio ... folder=Footsteps`.
+  - To change an existing folder: `set_properties audiofolder Music {"DefaultBundlingType": "InGameEXE"}`.
+  - Check a folder's defaults before importing into it. The templates' `Music` folder repeats and goes into `audio.vox`.
 - **Channels.** `MaxChannels` limits how many clips of a type play at once (0 = unlimited). Music is 1, so a new track replaces the old one. To layer several ambience loops, raise it: `set_properties audiocliptype "Ambient Sound" {"MaxChannels": 3}`. New types come from `create_entity audiocliptype {"Name": "Voice"}` (scripts see `eAudioTypeVoice`).
 - **Looping.** `aBed.Play(eAudioPriorityNormal, eRepeat)` loops. Folder or clip `DefaultRepeat` is the default when `Play()` gets no repeat argument.
 - **Bundling.** `InGameEXE` packs the clip into the game data. `InSeparateVOX` puts it in `audio.vox`, which is common for music.

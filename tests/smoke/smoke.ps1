@@ -260,6 +260,16 @@ try {
         $d = Get-Json (Invoke-Mcp "delete_entity" @{ type = "audiocliptype"; id = "SmokeType" })
         $after -eq 3 -and $t.id -ne $null -and $d.deleted
     }
+    Check "audiofolder: create with defaults, import into it, refuse deleting it while non-empty" {
+        $f = Get-Json (Invoke-Mcp "create_entity" @{ type = "audiofolder"; properties = @{ Name = "SmokeSfx"; DefaultType = "Sound"; DefaultVolume = 60 } })
+        $vol = ((Get-Json (Invoke-Mcp "get_properties" @{ type = "audiofolder"; id = "SmokeSfx" })).properties | Where-Object { $_.name -eq "DefaultVolume" }).value
+        $c = Get-Json (Invoke-Mcp "import_audio" @{ path = $wavPath; name = "aSmokeSfx"; folder = "SmokeSfx" })
+        $refused = $false
+        try { Invoke-Mcp "delete_entity" @{ type = "audiofolder"; id = "SmokeSfx" } | Out-Null } catch { $refused = $_.Exception.Message -match "not empty" }
+        Invoke-Mcp "delete_audio" @{ clip = "aSmokeSfx" } | Out-Null
+        $d = Get-Json (Invoke-Mcp "delete_entity" @{ type = "audiofolder"; id = "SmokeSfx" })
+        $f.created -and $vol -eq 60 -and $c.folder -eq "SmokeSfx" -and $c.typeName -eq "Sound" -and $refused -and $d.deleted
+    }
     Check "a script that plays the clip compiles" {
         Invoke-Mcp "write_script" @{ name = "McpSmoke"; text = "// fixed`r`nint ok_value = 1;`r`nfunction SmokePlay() { aSmokeBeep.Play(); }" } | Out-Null
         (Get-Json (Invoke-Mcp "compile")).ok -eq $true

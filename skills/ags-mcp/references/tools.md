@@ -8,7 +8,7 @@ Argument shapes and quirks, grouped by area. `N` is a room number. Where a tool 
 |---|---|
 | `project_info` | Always first. Returns `resolution`, `colorDepth`, `playerCharacter`, counts and the enabled `plugins`. |
 | `save_project` | Writes `Game.agf`, `acsprset.spr` (sprites), scripts and the loaded room. Cheap; call it after any entity/sprite/view change and before `run_game`. |
-| `list_entities type` | `character`, `inventory`, `dialog`, `gui`, `view`, `cursor`, `font`, `audioclip`, `audiocliptype`, `globalvariable`, `customproperty`. Returns `{id, name}`; `id` strings. |
+| `list_entities type` | `character`, `inventory`, `dialog`, `gui`, `view`, `cursor`, `font`, `audioclip`, `audiocliptype`, `audiofolder`, `globalvariable`, `customproperty`. Returns `{id, name}`; `id` strings. |
 | `find_usages name` | Whole-word search across modules, room scripts and dialog scripts. Use before renames/deletes. |
 | `create_project folder [template gameName fileName]` / `open_project path` | Replace the open game. Use them only when the user asks for a new or different game; everything else happens in the open one. Both save the current one first unless `saveCurrent=false`. `open_project` cannot reopen the game that is already open (the editor's lock file), so "reload from disk" means restarting the editor. |
 
@@ -18,7 +18,7 @@ Argument shapes and quirks, grouped by area. `N` is a room number. Where a tool 
 |---|---|
 | `get_properties type id` | `id` is the numeric ID or script name. Returns every property with `type`, `readOnly`, `value` and, for characters and inventory, the `events` with bound functions. |
 | `set_properties type id properties` | Enums by name or number. Script names are uniqueness-checked (including derived macros). Needs `save_project`. |
-| `create_entity type [properties]` | Auto-names (`cChar3`, `iInvItem4`) unless `Name`/`ScriptName` is given. Inventory: `{Name, Description, Image, CursorImage, HotspotX, HotspotY}`. Character: `{ScriptName, RealName, NormalView, IdleView, IdleDelay, StartingRoom, StartX, StartY, SpeechColor, Solid, Clickable, DiagonalLoops}`. `globalvariable`, `customproperty` and `audiocliptype` need `Name`. Audio clips come from `import_audio`, not here. Returns the new `id`. |
+| `create_entity type [properties]` | Auto-names (`cChar3`, `iInvItem4`) unless `Name`/`ScriptName` is given. Inventory: `{Name, Description, Image, CursorImage, HotspotX, HotspotY}`. Character: `{ScriptName, RealName, NormalView, IdleView, IdleDelay, StartingRoom, StartX, StartY, SpeechColor, Solid, Clickable, DiagonalLoops}`. `globalvariable`, `customproperty`, `audiocliptype` and `audiofolder` need `Name` (`audiofolder` also takes `Parent`). Audio clips come from `import_audio`, not here. Returns the new `id`. |
 | `delete_entity type id` | Renumbers higher IDs like the editor does, so re-read IDs afterwards. |
 | `set_event type id event [function]` | `type` is `character` or `inventory`. Events: characters `Look, Interact, Talk, UseInv, AnyClick, PickUp`; inventory `Look, Interact, Talk, UseInv, OtherClick`. Adds a stub to `GlobalScript.asc` named `<scriptName>_<event>` and binds it. Then `edit_script GlobalScript` to fill the stub. |
 | `get_dialog_script id` / `set_dialog_script id [script] [options]` | `options` is `[{text, show, say}]` (numbered from 1 in order). See scripting.md for the dialog-script format. |
@@ -74,6 +74,7 @@ See audio.md for making the sounds. Clips live in `Game.agf`, so `save_project` 
 | `replace_audio clip [path\|base64+fileName]` | Keeps the script name, ID and index. With no file, re-copies the current source into the cache (after regenerating it in place; a build also does this when the source's timestamp changed). |
 | `delete_audio clip [force]` | Refuses, listing the uses, while a view frame, the score sound or a script names it. Later clips shift down one ID; indexes stay. Deletes the cache copy, keeps the source. |
 | `audiocliptype` entities | `get_properties`/`set_properties audiocliptype "Ambient Sound" {MaxChannels: 3}` (also `VolumeReductionWhileSpeechPlaying`, `CrossfadeClips`, `Name`). `create_entity audiocliptype {Name}`; `delete_entity` refuses while a clip or folder uses the type. `TypeID` is read-only. |
+| `audiofolder` entities | Addressed by name (`list_entities audiofolder`; the root is usually `Main`). Properties `DefaultType` (type name or ID), `DefaultBundlingType`, `DefaultVolume` (0..100), `DefaultPriority`, `DefaultRepeat`, `Name` (unique). Clips set to Inherit play with the nearest folder's volume, priority and repeat. `create_entity audiofolder {Name, Parent?, ...defaults}` starts with the parent's type and bundling; `delete_entity` refuses the root and non-empty folders. |
 
 ## Build and run
 

@@ -22,6 +22,13 @@ namespace AgsMcp.Editor.Tools
         public Func<Game, JObject, object> Create;
         /// <summary>Removes the entity from the game, or null if it cannot be deleted here.</summary>
         public Action<Game, object> Delete;
+        /// <summary>
+        /// Optional check of one property value before set_properties/create_entity applies it: (game, entity, property
+        /// name, value) returns the value to apply (possibly normalised) or throws a ToolException. Null: no check.
+        /// </summary>
+        public Func<Game, object, string, JToken, JToken> PrepareProperty;
+        /// <summary>Optional follow-up after an entity of this kind is created, changed or deleted (refresh the editor).</summary>
+        public Action<Game> AfterChange;
     }
 
     internal static class EntityRegistry
@@ -187,6 +194,8 @@ namespace AgsMcp.Editor.Tools
                     Enumerate = g => g.AudioClipFlatList.Cast<object>(),
                     IdOf = e => ((AudioClip)e).ID.ToString(),
                     NameOf = e => ((AudioClip)e).ScriptName,
+                    PrepareProperty = (g, e, prop, value) => prop == "Type" ? AudioTypeIdToken(g, value) : value,
+                    AfterChange = g => EditorInternals.RefreshAudioTree(),
                 },
                 new EntityKind
                 {
@@ -198,12 +207,9 @@ namespace AgsMcp.Editor.Tools
                     NameOf = e => ((AudioClipType)e).Name,
                     Create = (g, p) =>
                     {
-                        string name = RequireName(p);
-                        if (g.AudioClipTypes.Any(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)))
-                            throw new ToolException($"An audio type named '{name}' already exists.");
+                        string name = UniqueAudioTypeName(g, null, RequireName(p));
                         var type = new AudioClipType(g.AudioClipTypes.Count + 1, name, 0, 0, false, CrossfadeSpeed.No);
                         g.AudioClipTypes.Add(type);
-                        AfterAudioTypesChanged();
                         return type;
                     },
                     Delete = (g, e) =>
@@ -214,8 +220,7 @@ namespace AgsMcp.Editor.Tools
                         int clips = g.AudioClipFlatList.Count(c => c.Type == id);
                         if (clips > 0)
                             throw new ToolException($"Audio type '{type.Name}' is used by {clips} audio clip(s); change their Type first.");
-                        var folders = new List<AudioClipFolder>();
-                        CollectAudioFolders(g.RootAudioClipFolder, folders);
+                        List<AudioClipFolder> folders = AudioTools.AllFolders(g.RootAudioClipFolder);
                         string usedBy = string.Join(", ", folders.Where(f => f.DefaultType == id).Select(f => f.Name));
                         if (usedBy.Length > 0)
                             throw new ToolException($"Audio type '{type.Name}' is the default type of folder(s) {usedBy}; change their DefaultType first.");
@@ -223,8 +228,56 @@ namespace AgsMcp.Editor.Tools
                         foreach (AudioClipType t in g.AudioClipTypes) if (t.TypeID > id) t.TypeID--;
                         foreach (AudioClip c in g.AudioClipFlatList) if (c.Type > id) c.Type--;
                         foreach (AudioClipFolder f in folders) if (f.DefaultType > id) f.DefaultType--;
-                        AfterAudioTypesChanged();
                     },
+                    PrepareProperty = (g, e, prop, value) =>
+                        prop == "Name" ? new JValue(UniqueAudioTypeName(g, (AudioClipType)e, value?.ToString())) : value,
+                    AfterChange = g =>
+                    {
+                        AudioClipTypeTypeConverter.RefreshAudioClipTypeList();
+                        EditorInternals.RefreshAudioTree();
+                    },
+                },
+                new EntityKind
+                {
+                    // Audio folders, addressed by name (the root is the game's top Audio node, usually "Main"). Their
+                    // defaults matter at run time: a clip whose volume/priority/repeat is Inherit takes the nearest
+                    // folder's, and new clips take DefaultType/DefaultBundlingType. Names are kept unique so they
+                    // stay addressable; create takes an optional 'Parent' folder name.
+                    Name = "audiofolder", NameProperty = null,
+                    Enumerate = g => AudioTools.AllFolders(g.RootAudioClipFolder).Cast<object>(),
+                    IdOf = e => ((AudioClipFolder)e).Name,
+                    NameOf = e => ((AudioClipFolder)e).Name,
+                    Create = (g, p) =>
+                    {
+                        string name = UniqueAudioFolderName(g, null, RequireName(p));
+                        AudioClipFolder parent = AudioTools.ResolveFolder(g, StringProp(p, "Parent", null));
+                        AudioClipFolder folder = parent.CreateChildFolder(name); // inherits DefaultType and DefaultBundlingType
+                        parent.SubFolders.Add(folder);
+                        return folder;
+                    },
+                    Delete = (g, e) =>
+                    {
+                        var folder = (AudioClipFolder)e;
+                        if (folder == g.RootAudioClipFolder)
+                            throw new ToolException("The root audio folder cannot be deleted.");
+                        if (folder.Items.Count > 0 || folder.SubFolders.Count > 0)
+                            throw new ToolException($"Audio folder '{folder.Name}' is not empty ({folder.Items.Count} clip(s), {folder.SubFolders.Count} subfolder(s)). Delete or move them first.");
+                        AudioTools.FindParentFolder(g.RootAudioClipFolder, folder)?.SubFolders.Remove(folder);
+                    },
+                    PrepareProperty = (g, e, prop, value) =>
+                    {
+                        switch (prop)
+                        {
+                            case "Name": return new JValue(UniqueAudioFolderName(g, (AudioClipFolder)e, value?.ToString()));
+                            case "DefaultType": return AudioTypeIdToken(g, value);
+                            case "DefaultVolume":
+                                if (value == null || value.Type != JTokenType.Integer || (int)value < 0 || (int)value > 100)
+                                    throw new ToolException("DefaultVolume must be an integer 0..100.");
+                                return value;
+                            default: return value;
+                        }
+                    },
+                    AfterChange = g => EditorInternals.RefreshAudioTree(),
                 },
                 new EntityKind
                 {
@@ -282,16 +335,26 @@ namespace AgsMcp.Editor.Tools
             return kinds.ToDictionary(k => k.Name, k => k);
         }
 
-        private static void AfterAudioTypesChanged()
+        /// <summary>An audio type given by TypeID or name, as its TypeID; throws if there is no such type.</summary>
+        private static JToken AudioTypeIdToken(Game game, JToken value) =>
+            new JValue(AudioTools.ResolveClipType(game.AudioClipTypes, value?.ToString()).TypeID);
+
+        private static string UniqueAudioTypeName(Game game, AudioClipType self, string name)
         {
-            AudioClipTypeTypeConverter.RefreshAudioClipTypeList();
-            EditorInternals.RefreshAudioTree();
+            name = (name ?? string.Empty).Trim();
+            if (name.Length == 0) throw new ToolException("An audio type needs a non-empty Name.");
+            if (game.AudioClipTypes.Any(t => t != self && string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)))
+                throw new ToolException($"An audio type named '{name}' already exists.");
+            return name;
         }
 
-        private static void CollectAudioFolders(AudioClipFolder folder, List<AudioClipFolder> into)
+        private static string UniqueAudioFolderName(Game game, AudioClipFolder self, string name)
         {
-            into.Add(folder);
-            foreach (AudioClipFolder sub in folder.SubFolders) CollectAudioFolders(sub, into);
+            name = (name ?? string.Empty).Trim();
+            if (name.Length == 0) throw new ToolException("An audio folder needs a non-empty Name.");
+            if (AudioTools.AllFolders(game.RootAudioClipFolder).Any(f => f != self && string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase)))
+                throw new ToolException($"An audio folder named '{name}' already exists.");
+            return name;
         }
 
         private static string RequireName(JObject props)

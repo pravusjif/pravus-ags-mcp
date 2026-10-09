@@ -122,9 +122,10 @@ src/AgsMcp.Editor/
 
 ### Game data
 - **One generic property mechanism.** `get_properties`/`set_properties` reflect over any `AGS.Types` object with `TypeDescriptor.GetProperties`, so the editor's own `[Browsable]`, `[Category]`, `[Description]`, `[DisplayName]`, `[ReadOnly]` attributes and `ICustomTypeDescriptor` (used by Settings) apply for free, with the property grid's semantics and one code path.
-- **An entity registry** (`Tools/EntityRegistry.cs`) maps a `type` string to how to list, identify, create and delete that entity. `id` accepts the numeric ID or the script name. Types: character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, globalvariable, customproperty, setting. Create and delete cover character, inventory, dialog, gui, view, cursor, audiocliptype, globalvariable and customproperty. Audio clips are created and deleted by the audio tools (see [Audio](#audio)), which also need the file copy.
+- **An entity registry** (`Tools/EntityRegistry.cs`) maps a `type` string to how to list, identify, create and delete that entity. `id` accepts the numeric ID or the script name. Types: character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, audiofolder, globalvariable, customproperty, setting. Create and delete cover character, inventory, dialog, gui, view, cursor, audiocliptype, audiofolder, globalvariable and customproperty. Audio clips are created and deleted by the audio tools (see [Audio](#audio)), which also need the file copy.
 - Create and delete work on the model and renumber IDs exactly as the editor's components do. `set_properties` enforces script-name uniqueness, including the macro AGS derives from character and GUI names (`cGuard` defines `GUARD`). A global variable cannot be renamed through `set_properties`, because its name is its dictionary key; delete and recreate it.
-- These tools do not call the components' `PropertyChanged`/`RePopulateTreeView`/`RefreshPropertyGrid`, so open panes show the change after a reload. They were written when tool work could not touch editor UI; now that it runs on the main-window thread, wiring in those refreshes is possible.
+- A kind can add two hooks. `PrepareProperty` checks or normalises a value before it is applied; the audio kinds use it to take a type name for `Type`/`DefaultType` and to keep names unique. `AfterChange` runs after a create, a set or a delete; the audio kinds use it to refresh the Audio tree.
+- Apart from those hooks, these tools do not call the components' `PropertyChanged`/`RePopulateTreeView`/`RefreshPropertyGrid`, so open panes show the change after a reload. They were written when tool work could not touch editor UI; now that it runs on the main-window thread, wiring in those refreshes is possible.
 - `get_dialog_script`/`set_dialog_script` cover the dialog-language text and the options. `set_event` binds character and inventory events and adds a stub to GlobalScript; `get_properties` lists an entity's events.
 
 ### Rooms
@@ -151,6 +152,10 @@ src/AgsMcp.Editor/
 - **`replace_audio` keeps `ScriptName`, `ID` and `Index`.** Without a new file, it re-copies the current source into the cache, as the editor's "Force reimport" does.
 - **`delete_audio` refuses while the clip is in use**, unless `force=true`. Uses are view frames whose `Sound` is the clip's `Index`, `Settings.PlaySoundOnScore`, and a whole-word script name match in modules, headers and room scripts. Like the editor, it decrements higher clip `ID`s and deletes the cache file. Indexes never change.
 - **Audio types are the `audiocliptype` entity kind.** `TypeID` is `[ReadOnly]`, so `set_properties` cannot change it. Create appends `Count + 1`. Delete refuses for the last type, a type used by a clip, or a folder's `DefaultType`; otherwise it renumbers higher `TypeID`s on the types, clips and folders. The editor does not renumber folder defaults.
+- **Audio folders are the `audiofolder` entity kind, addressed by name.** Their defaults are not just tree organisation. At build time a clip whose volume, priority or repeat is `Inherit` takes the nearest folder's value, and new clips take `DefaultType`/`DefaultBundlingType`.
+  - Create takes `Name` and an optional `Parent` (default: the root). It uses `parent.CreateChildFolder(name)`, so the new folder starts with the parent's `DefaultType` and `DefaultBundlingType`, as in the editor.
+  - Names are kept unique across the tree, so a folder stays addressable. The editor itself allows duplicates; with duplicates, the first match depth-first wins.
+  - Delete refuses the root and any folder that still has clips or subfolders. `DefaultVolume` must be 0..100.
 - **Making sound is the skill's job.** `skills/ags-mcp/scripts/sfx.py` synthesises WAVs (numpy: oscillators, modal synthesis, FFT-shaped noise, reverb, seamless-loop helpers, checks, spectrogram previews), and the agent imports them. The server stays a thin editor bridge.
 
 ### Build and run
@@ -170,10 +175,10 @@ src/AgsMcp.Editor/
 - No `delete_room` or room renumbering.
 - GUI **controls** cannot be created, deleted, read or written (GUIs themselves can).
 - Fonts cannot be created (they are backed by resource files); list, get and set work.
-- Audio folders cannot be created, moved or renamed. `import_audio` places clips into existing folders only.
+- Audio clips and folders cannot be moved between folders.
 - 8-bit backgrounds cannot be imported into 256-colour games.
 - No automatic backup of `Game.agf` before the first write of a session.
-- Game-data, sprite and new-module changes do not refresh the editor's project tree or open panes until the next reload. The audio tools are the exception.
+- Game-data, sprite and new-module changes do not refresh the editor's project tree or open panes until the next reload. The audio tools and the audio entity kinds are the exception.
 - `open_project` cannot reopen the game that is already open (`_OpenInEditor.lock`); reloading from disk means restarting the editor.
 - The editor-debugger named pipes (`--enabledebugger <token>`) are not hosted, so runtime errors come only from the engine log, without call stacks.
 
@@ -188,7 +193,7 @@ src/AgsMcp.Editor/
   Or use the MCP Inspector CLI:
   `npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:7471/mcp --transport http --method tools/list`
   When a call fails, read `%APPDATA%\AGS-MCP\plugin.log`.
-- **Smoke test:** `tests/smoke/smoke.ps1`, run after `.\build.ps1 -Engine -Deploy -Run`. It creates a throwaway game from the Sierra-style template in a temp folder (`create_project`) and drives every tool group against it over HTTP: a compile error and its fix, a property round-trip, room authoring on a probe room, `render_room`, `import_sprite`, `create_view` in its schema form, the audio tools (import by path and base64, an `audiocliptype` round-trip, the in-use refusal, a script that plays the clip, `replace_audio`, `delete_audio`), a character event, dialog options, `build_game`, `run_game`, the `game_*` tools including a queued `game_process_click` and `game_wait_until ready`, and `stop_game`. It reports pass/fail counts and exits non-zero on failure.
+- **Smoke test:** `tests/smoke/smoke.ps1`, run after `.\build.ps1 -Engine -Deploy -Run`. It creates a throwaway game from the Sierra-style template in a temp folder (`create_project`) and drives every tool group against it over HTTP: a compile error and its fix, a property round-trip, room authoring on a probe room, `render_room`, `import_sprite`, `create_view` in its schema form, the audio tools (import by path and base64, an `audiocliptype` round-trip, an `audiofolder` with defaults that a clip is imported into and that cannot be deleted while it holds the clip, the in-use refusal, a script that plays the clip, `replace_audio`, `delete_audio`), a character event, dialog options, `build_game`, `run_game`, the `game_*` tools including a queued `game_process_click` and `game_wait_until ready`, and `stop_game`. It reports pass/fail counts and exits non-zero on failure.
   - Because it works on its own game, no existing game is modified. Afterwards it reopens the game that was open (`open_project`, discarding the throwaway game's unsaved state) and deletes the temp folder. The game open at the start is saved first, as File > New Game does. `-Keep` leaves the throwaway game open for inspection.
 
 ## AGS reference

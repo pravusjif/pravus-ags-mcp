@@ -167,7 +167,7 @@ call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts eith
 | `save_project` | Write all in-memory changes to disk (`Game.agf`, scripts, sprites, the loaded room). |
 | `create_project(folder, [template], [gameName], [fileName], [saveCurrent])` | Create a game from an editor template (Sierra-style, Empty Game, …) in a new or empty folder and open it. |
 | `open_project(path, [saveCurrent])` | Open another game (`Game.agf` or its folder) in the editor. |
-| `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, globalvariable, customproperty). |
+| `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, audiofolder, globalvariable, customproperty). |
 | `find_usages(name, [limit])` | Whole-word search for an identifier across script modules, room scripts and dialog scripts. |
 
 ### Game data
@@ -175,7 +175,7 @@ call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts eith
 |------|-------------|
 | `get_properties(type, id)` | All properties of an entity (honours the editor's property-grid metadata), plus its events for characters and inventory items. |
 | `set_properties(type, id, properties)` | Set one or more properties (enum by name or number; script-name uniqueness enforced). |
-| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, audio type, global variable or custom-property definition. |
+| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, audio type, audio folder, global variable or custom-property definition. |
 | `delete_entity(type, id)` | Delete an entity and renumber IDs as the editor does. |
 | `get_dialog_script(id)` / `set_dialog_script(id, [script], [options])` | Read/write a dialog's options (`{text, show, say}`) and its dialog-script text. |
 | `set_event(type, id, event, [function])` | Bind a character or inventory event (Look, Interact, Talk, UseInv, …) and add a stub to GlobalScript. |
@@ -227,6 +227,7 @@ the room script.
 | `replace_audio(clip, [path\|base64+fileName])` | Point a clip at a new file (or re-copy its current source), keeping its script name, ID and index. |
 | `delete_audio(clip, [force])` | Delete a clip and its cache copy (refuses, listing the uses, while views or scripts refer to it). |
 | `audiocliptype` (as an entity type) | Audio types (Sound, Music, Ambient Sound…): `MaxChannels`, crossfade, speech volume reduction; create and delete. |
+| `audiofolder` (as an entity type) | Audio folders, by name: their default type, bundling, volume, priority and repeat (inherited by clips set to Inherit); create (optionally under a `Parent`), rename, and delete when empty. |
 
 The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` generates WAVs with numpy for
 `import_audio` (see [skills/ags-mcp/references/audio.md](skills/ags-mcp/references/audio.md)).

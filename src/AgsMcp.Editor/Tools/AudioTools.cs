@@ -369,47 +369,32 @@ namespace AgsMcp.Editor.Tools
             throw new ToolException($"No audio clip with script name or ID '{want}'. Use list_entities type=audioclip to see them.");
         }
 
-        private static AudioClipFolder ResolveFolder(Game game, string name)
+        /// <summary>An audio folder by name (case-insensitive, searched depth-first), or the root for an empty name.</summary>
+        internal static AudioClipFolder ResolveFolder(Game game, string name)
         {
-            AudioClipFolder root = game.RootAudioClipFolder;
-            if (string.IsNullOrWhiteSpace(name)) return root;
-            AudioClipFolder found = FindFolder(root, name.Trim());
+            List<AudioClipFolder> all = AllFolders(game.RootAudioClipFolder);
+            if (string.IsNullOrWhiteSpace(name)) return all[0];
+            AudioClipFolder found = all.FirstOrDefault(f => string.Equals(f.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
             if (found == null)
-            {
-                var names = new List<string>();
-                CollectFolderNames(root, names);
-                throw new ToolException($"No audio folder named '{name}'. Folders: {string.Join(", ", names)}.");
-            }
+                throw new ToolException($"No audio folder named '{name}'. Folders: {string.Join(", ", all.Select(f => f.Name))}.");
             return found;
         }
 
-        private static AudioClipFolder FindFolder(AudioClipFolder folder, string name)
+        /// <summary>The folder and all its subfolders, depth-first, the folder itself first.</summary>
+        internal static List<AudioClipFolder> AllFolders(AudioClipFolder root)
         {
-            if (string.Equals(folder.Name, name, StringComparison.OrdinalIgnoreCase)) return folder;
-            foreach (AudioClipFolder sub in folder.SubFolders)
-            {
-                AudioClipFolder found = FindFolder(sub, name);
-                if (found != null) return found;
-            }
-            return null;
+            var all = new List<AudioClipFolder> { root };
+            for (int i = 0; i < all.Count; i++)
+                all.InsertRange(i + 1, all[i].SubFolders);
+            return all;
         }
 
-        private static void CollectFolderNames(AudioClipFolder folder, List<string> names)
-        {
-            names.Add(folder.Name);
-            foreach (AudioClipFolder sub in folder.SubFolders) CollectFolderNames(sub, names);
-        }
+        /// <summary>The folder whose SubFolders hold 'child', or null for the root (or a folder not in the tree).</summary>
+        internal static AudioClipFolder FindParentFolder(AudioClipFolder root, AudioClipFolder child) =>
+            AllFolders(root).FirstOrDefault(f => f.SubFolders.Contains(child));
 
-        private static AudioClipFolder FindFolderContaining(AudioClipFolder folder, AudioClip clip)
-        {
-            if (folder.Items.Contains(clip)) return folder;
-            foreach (AudioClipFolder sub in folder.SubFolders)
-            {
-                AudioClipFolder found = FindFolderContaining(sub, clip);
-                if (found != null) return found;
-            }
-            return null;
-        }
+        private static AudioClipFolder FindFolderContaining(AudioClipFolder root, AudioClip clip) =>
+            AllFolders(root).FirstOrDefault(f => f.Items.Contains(clip));
 
         private static AudioClipType FolderDefaultType(Game game, AudioClipFolder folder)
         {

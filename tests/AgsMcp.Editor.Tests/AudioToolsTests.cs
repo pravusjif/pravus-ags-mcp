@@ -141,6 +141,23 @@ namespace AgsMcp.Editor.Tests
         }
 
         [Fact]
+        public void ListsFoldersDepthFirstAndFindsParents()
+        {
+            var root = new AudioClipFolder("Main");
+            var music = new AudioClipFolder("Music");
+            var themes = new AudioClipFolder("Themes");
+            var sounds = new AudioClipFolder("Sounds");
+            root.SubFolders.Add(music);
+            root.SubFolders.Add(sounds);
+            music.SubFolders.Add(themes);
+
+            Assert.Equal(new[] { "Main", "Music", "Themes", "Sounds" }, AudioTools.AllFolders(root).Select(f => f.Name).ToArray());
+            Assert.Same(music, AudioTools.FindParentFolder(root, themes));
+            Assert.Same(root, AudioTools.FindParentFolder(root, sounds));
+            Assert.Null(AudioTools.FindParentFolder(root, root));
+        }
+
+        [Fact]
         public void ImportSchemaIsFlat()
         {
             JObject schema = AudioTools.ImportAudioSchema();
