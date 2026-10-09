@@ -167,7 +167,7 @@ call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts eith
 | `save_project` | Write all in-memory changes to disk (`Game.agf`, scripts, sprites, the loaded room). |
 | `create_project(folder, [template], [gameName], [fileName], [saveCurrent])` | Create a game from an editor template (Sierra-style, Empty Game, …) in a new or empty folder and open it. |
 | `open_project(path, [saveCurrent])` | Open another game (`Game.agf` or its folder) in the editor. |
-| `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, view, cursor, font, audioclip, globalvariable, customproperty). |
+| `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, globalvariable, customproperty). |
 | `find_usages(name, [limit])` | Whole-word search for an identifier across script modules, room scripts and dialog scripts. |
 
 ### Game data
@@ -175,7 +175,7 @@ call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts eith
 |------|-------------|
 | `get_properties(type, id)` | All properties of an entity (honours the editor's property-grid metadata), plus its events for characters and inventory items. |
 | `set_properties(type, id, properties)` | Set one or more properties (enum by name or number; script-name uniqueness enforced). |
-| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, global variable or custom-property definition. |
+| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, audio type, global variable or custom-property definition. |
 | `delete_entity(type, id)` | Delete an entity and renumber IDs as the editor does. |
 | `get_dialog_script(id)` / `set_dialog_script(id, [script], [options])` | Read/write a dialog's options (`{text, show, say}`) and its dialog-script text. |
 | `set_event(type, id, event, [function])` | Bind a character or inventory event (Look, Interact, Talk, UseInv, …) and add a stub to GlobalScript. |
@@ -218,7 +218,18 @@ the room script.
 | `get_sprite(number)` | Return a sprite as a PNG. |
 | `replace_sprite(number, path\|base64, …)` | Replace a sprite's image, keeping its number. |
 | `delete_sprite(number)` | Delete a sprite (refuses with a usage report if still referenced). |
-| `create_view([name], loops)` | Create a view; `loops` is an array of `{frames, runNextLoop?}` and each frame is `{sprite, delay?, flipped?, sound?}`. |
+| `create_view([name], loops)` | Create a view; `loops` is an array of `{frames, runNextLoop?}` and each frame is `{sprite, delay?, flipped?, sound?}` (`sound` is an audio clip's index). |
+
+### Audio
+| Tool | Description |
+|------|-------------|
+| `import_audio(path\|base64+fileName, [name], [folder], [type], [bundling], [volume], [priority], [repeat])` | Create an audio clip from an OGG/MP3/WAV/VOC/MIDI/MOD file: registers it in the project and copies it into the `AudioCache` the build packs. Returns its script name and index. |
+| `replace_audio(clip, [path\|base64+fileName])` | Point a clip at a new file (or re-copy its current source), keeping its script name, ID and index. |
+| `delete_audio(clip, [force])` | Delete a clip and its cache copy (refuses, listing the uses, while views or scripts refer to it). |
+| `audiocliptype` (as an entity type) | Audio types (Sound, Music, Ambient Sound…): `MaxChannels`, crossfade, speech volume reduction; create and delete. |
+
+The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` generates WAVs with numpy for
+`import_audio` (see [skills/ags-mcp/references/audio.md](skills/ags-mcp/references/audio.md)).
 
 ### Build and run
 | Tool | Description |
@@ -245,10 +256,10 @@ the room script.
 
 ## Testing
 
-- **Unit tests:** `.\build.ps1 -Test` (xUnit; protocol/transport, script-text, property reflection, room/asset/build parsing, key-map and wait conditions).
+- **Unit tests:** `.\build.ps1 -Test` (xUnit; protocol/transport, script-text, property reflection, room/asset/audio/build parsing, key-map and wait conditions).
 - **Smoke test:** `tests\smoke\smoke.ps1` drives a live editor through every tool group over HTTP on a throwaway
   game it creates from the Sierra-style template (compile error and fix, a property round-trip, room authoring,
-  `render_room`, `import_sprite`, `build_game`, `run_game`, `game_*`), then reopens the game you had open and
+  `render_room`, `import_sprite`, the audio tools, `build_game`, `run_game`, `game_*`), then reopens the game you had open and
   deletes the throwaway one. Run it after `build.ps1 -Engine -Deploy -Run`.
 
 ## Layout
@@ -263,7 +274,7 @@ src/AgsMcp.Editor/       editor plugin (AGS.Plugin.Mcp.dll), .NET Framework 4.6
 src/AgsMcp.Engine/       native engine plugin (agsmcp.dll), C++/x86, CMake
 tests/AgsMcp.Editor.Tests/   unit tests
 tests/smoke/smoke.ps1        end-to-end smoke test against a live editor
-skills/ags-mcp/              agent skill (SKILL.md) for working on a game through these tools
+skills/ags-mcp/              agent skill (SKILL.md) for working on a game through these tools, with pixel-art and sound helpers
 install.ps1                  installer (downloads a release, or installs from one)
 AGENTS.md                    instructions for coding agents working on this repo (CLAUDE.md imports it)
 build.ps1                    build, test, deploy and package

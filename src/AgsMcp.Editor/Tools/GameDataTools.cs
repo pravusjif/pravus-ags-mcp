@@ -32,7 +32,7 @@ namespace AgsMcp.Editor.Tools
             Schema.String("Entity type: " + string.Join(", ", EntityRegistry.TypeNames) + ".");
 
         private static JObject IdProp() =>
-            Schema.String("The entity's numeric ID or its script name. (For globalvariable/customproperty, the name.)");
+            Schema.String("The entity's numeric ID or its script name. (For globalvariable/customproperty, the name; for audiocliptype, the TypeID or name.)");
 
         private static Tool ListEntities(ToolContext ctx) => new Tool
         {
@@ -107,11 +107,12 @@ namespace AgsMcp.Editor.Tools
             Title = "Create entity",
             Description = "Create a new entity and register it in the project. Creatable types: " +
                           string.Join(", ", EntityRegistry.TypeNames.Where(IsCreatable)) + ". " +
-                          "globalvariable and customproperty require a 'Name' in properties; others are auto-named. " +
+                          "globalvariable, customproperty and audiocliptype require a 'Name' in properties; others are auto-named. " +
+                          "Audio clips come from import_audio. " +
                           "Any other given properties are applied to the new entity. Call save_project to persist.",
             InputSchema = Schema.Object()
                 .Required("type", TypeProp())
-                .Optional("properties", Schema.AnyObject("Initial property values. 'Name' is required for globalvariable/customproperty."))
+                .Optional("properties", Schema.AnyObject("Initial property values. 'Name' is required for globalvariable/customproperty/audiocliptype."))
                 .Build(),
             Annotations = ToolAnnotations.Mutating,
             Handler = args =>
@@ -119,7 +120,7 @@ namespace AgsMcp.Editor.Tools
                 Game game = ctx.RequireGame();
                 EntityKind kind = EntityRegistry.Get(args.String("type"));
                 if (kind.Create == null)
-                    throw new ToolException($"Entities of type '{kind.Name}' cannot be created with this tool.");
+                    throw new ToolException($"Entities of type '{kind.Name}' cannot be created with this tool." + (kind.Name == "audioclip" ? " Use import_audio." : ""));
 
                 JObject props = args.Has("properties") ? args.Object("properties") : new JObject();
                 object entity = kind.Create(game, props);
@@ -151,7 +152,7 @@ namespace AgsMcp.Editor.Tools
                 Game game = ctx.RequireGame();
                 EntityKind kind = EntityRegistry.Get(args.String("type"));
                 if (kind.Delete == null)
-                    throw new ToolException($"Entities of type '{kind.Name}' cannot be deleted with this tool.");
+                    throw new ToolException($"Entities of type '{kind.Name}' cannot be deleted with this tool." + (kind.Name == "audioclip" ? " Use delete_audio." : ""));
                 object entity = EntityRegistry.Resolve(kind, game, args.Raw["id"]);
                 string id = kind.IdOf(entity), name = kind.NameOf(entity);
                 kind.Delete(game, entity);

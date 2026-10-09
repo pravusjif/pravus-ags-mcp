@@ -378,7 +378,7 @@ namespace AgsMcp.Editor.Tools
         private static Bitmap Detach(Bitmap loaded, bool keepFormat) =>
             keepFormat ? loaded.Clone(new Rectangle(0, 0, loaded.Width, loaded.Height), loaded.PixelFormat) : new Bitmap(loaded);
 
-        private static string StripDataUrl(string value)
+        internal static string StripDataUrl(string value)
         {
             string s = (value ?? string.Empty).Trim();
             if (s.StartsWith("data:", StringComparison.OrdinalIgnoreCase))

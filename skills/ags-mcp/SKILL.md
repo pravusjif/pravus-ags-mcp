@@ -1,6 +1,6 @@
 ---
 name: ags-mcp
-description: Work on the Adventure Game Studio (AGS 3.6) game that is open in the AGS editor through the `ags` MCP server's tools (`project_info`, `get_room`, `game_state`, …; Claude Code shows them as `mcp__ags__*`). Use this whenever the user wants to build, change or fix anything in their AGS game — a room, background, hotspot, object, sprite, animation view, character, inventory item, dialog, puzzle, GUI setting, script or event — or generate pixel art for it, or check that it works in the running game with the `game_*` tools, even if they just say "add a door here", "give him a key", "make the cat talk" or "does it work?". Also use it when the ags server's tools are available in the session and the task touches the game project.
+description: Work on the Adventure Game Studio (AGS 3.6) game that is open in the AGS editor through the `ags` MCP server's tools (`project_info`, `get_room`, `game_state`, …; Claude Code shows them as `mcp__ags__*`). Use this whenever the user wants to build, change or fix anything in their AGS game — a room, background, hotspot, object, sprite, animation view, character, inventory item, dialog, puzzle, GUI setting, sound effect, music, script or event — or generate pixel art or sound for it, or check that it works in the running game with the `game_*` tools, even if they just say "add a door here", "give him a key", "make the cat talk" or "does it work?". Also use it when the ags server's tools are available in the session and the task touches the game project.
 ---
 
 # Working on an AGS game through the ags MCP server
@@ -19,7 +19,7 @@ The `ags` MCP server lives inside the running AGS 3.6 editor and edits **the pro
 2. Read what the change touches before changing it: `list_rooms`, `get_room N` for the rooms involved, `read_script roomN` and the parts of `GlobalScript` you will depend on, `list_entities character|inventory|view|dialog`, `get_properties` on the entities you will edit. Names, coordinates, flags, sprite numbers and coding conventions all come from there; match them.
 3. Keep the two persistence tiers in mind, because forgetting one loses work:
    - **Written immediately:** every room tool (`set_room_background`, `draw_room_mask`, `set_room_properties`, `create_room_object`, `set_room_event`, …) saves its `.crm`; `write_script` / `edit_script` / `create_script_module` save the script file.
-   - **Needs `save_project`:** everything in `Game.agf`: sprites, views, characters, inventory items, dialogs, global variables, entity properties, `runtime_enable_plugin`. Call `save_project` at the end of any batch that touched these, and before `run_game` (which builds from disk).
+   - **Needs `save_project`:** everything in `Game.agf`: sprites, views, audio clips, characters, inventory items, dialogs, global variables, entity properties, `runtime_enable_plugin`. Call `save_project` at the end of any batch that touched these, and before `run_game` (which builds from disk).
    - A room tool returns `save.saved=false` with compiler messages when the room's script does not compile. The edit is still in the editor; fix the script, then run any room tool or `save_project` to write it.
 
 ## The general loop
@@ -37,6 +37,8 @@ The `ags` MCP server lives inside the running AGS 3.6 editor and edits **the pro
 **Something new in an existing room** (object, hotspot, trigger). `get_room N` and `render_room N` (plus `mask=hotspots`/`walkableareas`) first, so the new thing fits the existing layout and IDs. Add art and masks only where needed, bind events, add handlers next to the existing ones, and keep existing handlers working.
 
 **Characters, inventory, dialogs.** `create_entity` with the properties the game's other entities use (look at one with `get_properties` first), `create_view` for animations, `set_event` for GlobalScript handlers, `set_dialog_script` for options and the dialog script. See [references/scripting.md](references/scripting.md) for the patterns.
+
+**Sound and music.** Generate WAVs with a seeded Python script using `scripts/sfx.py` ([references/audio.md](references/audio.md)), check them with `sfx.py info`/`preview`, then `import_audio` each one into the right folder and type, `save_project`, and play them from script (`aKnock.Play();`). Never hand-edit `Game.agf` to add clips.
 
 **Script-only changes.** `read_script` the relevant part, `edit_script` with a `find` unique enough to match once, `compile`. `find_usages` before renaming or removing anything.
 
@@ -78,3 +80,4 @@ Read each one when you reach that part of the job rather than all up front; they
 - [references/scripting.md](references/scripting.md): AGS 3.6 script patterns that work (handlers, inventory, state, dialog scripts, NPC entrances, ambient animated characters) and the usual pitfalls. Read it before writing handlers.
 - [references/playtesting.md](references/playtesting.md): the `game_*` loop: cursor modes, waiting correctly, dismissing message boxes, exact assertions. The play-test subagent reads it before it checks behaviour in the running game.
 - [references/pixel-art.md](references/pixel-art.md): generating crisp pixel-art backgrounds and sprites with Python/PIL, plus `scripts/pixelart.py`. Read it when you are about to draw.
+- [references/audio.md](references/audio.md): synthesising sound effects, ambience loops and music with numpy, plus `scripts/sfx.py`, and importing them as audio clips. Read it when the game needs sound.

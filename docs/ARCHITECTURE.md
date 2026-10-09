@@ -6,7 +6,7 @@ The tool reference is in [README.md](../README.md#tools). When you change behavi
 ## Scope
 
 - **Target:** the AGS **3.6.x** editor (developed against 3.6.2.21). AGS 4.0 is out of scope.
-- **What it covers:** project creation, scripts, game data, rooms, assets, building and running the game, and driving the running game the way a player would.
+- **What it covers:** project creation, scripts, game data, rooms, assets (sprites, views, audio clips), building and running the game, and driving the running game the way a player would.
 - **Clients:** any standards-compliant MCP client (Claude Code, Codex, Gemini CLI, …; stdio-only clients through `mcp-remote`). Only plain MCP is used, with no client-specific extensions, and tool schemas avoid `anyOf`/`oneOf`/`$ref` so clients with a restricted schema subset can use every tool.
 - **Install:** copying DLLs into the AGS folder. There is no stdio shim and no extra runtime.
 - **Deployment:** local use only. The server listens on loopback.
@@ -122,7 +122,7 @@ src/AgsMcp.Editor/
 
 ### Game data
 - **One generic property mechanism.** `get_properties`/`set_properties` reflect over any `AGS.Types` object with `TypeDescriptor.GetProperties`, so the editor's own `[Browsable]`, `[Category]`, `[Description]`, `[DisplayName]`, `[ReadOnly]` attributes and `ICustomTypeDescriptor` (used by Settings) apply for free, with the property grid's semantics and one code path.
-- **An entity registry** (`Tools/EntityRegistry.cs`) maps a `type` string to how to list, identify, create and delete that entity. `id` accepts the numeric ID or the script name. Types: character, inventory, dialog, gui, view, cursor, font, audioclip, globalvariable, customproperty, setting. Create and delete cover character, inventory, dialog, gui, view, cursor, globalvariable and customproperty.
+- **An entity registry** (`Tools/EntityRegistry.cs`) maps a `type` string to how to list, identify, create and delete that entity. `id` accepts the numeric ID or the script name. Types: character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, globalvariable, customproperty, setting. Create and delete cover character, inventory, dialog, gui, view, cursor, audiocliptype, globalvariable and customproperty. Audio clips are created and deleted by the audio tools (see [Audio](#audio)), which also need the file copy.
 - Create and delete work on the model and renumber IDs exactly as the editor's components do. `set_properties` enforces script-name uniqueness, including the macro AGS derives from character and GUI names (`cGuard` defines `GUARD`). A global variable cannot be renamed through `set_properties`, because its name is its dictionary key; delete and recreate it.
 - These tools do not call the components' `PropertyChanged`/`RePopulateTreeView`/`RefreshPropertyGrid`, so open panes show the change after a reload. They were written when tool work could not touch editor UI; now that it runs on the main-window thread, wiring in those refreshes is possible.
 - `get_dialog_script`/`set_dialog_script` cover the dialog-language text and the options. `set_event` binds character and inventory events and adds a stub to GlobalScript; `get_properties` lists an entity's events.
@@ -140,6 +140,19 @@ src/AgsMcp.Editor/
 - **`delete_sprite` keeps the editor's in-use check** (`SpriteTools.GetSpriteUsageReport`) and refuses with the report, but skips the `PreDeleteSprite` component event. The usage report covers views, characters and GUIs; uses in text scripts and rooms are not detected, as the editor itself warns.
 - **`create_view` checks that every referenced sprite exists** (`NativeProxy.DoesSpriteExist`) before allocating a view ID, so a bad request leaks no half-built view. Its schema declares exactly one form per level, a loop `{frames, runNextLoop?}` and a frame `{sprite, delay?, flipped?, sound?}`, with no `anyOf`/`oneOf`, so clients that validate arguments or restrict schema features (Gemini-based ones, for example) can follow it. The parser also accepts the older shorthand (a loop as a bare frame array, a frame as a bare sprite number) so existing callers keep working. Default transparency is `LeaveAsIs` and default `alpha` is true.
 
+### Audio
+- **`import_audio`/`replace_audio`/`delete_audio` (`Tools/AudioTools.cs`) rebuild the editor's own audio import with public `AGS.Types` members** instead of invoking `AudioComponent`'s private `CreateAudioClipForFile`/`ImportAudioFiles`. Those show a modal error box on a bad file and add the clip to `_folders[_rightClickedID]`, which is null until the user right-clicks the tree. The steps are the editor's:
+  1. `new AudioClip(name, game.GetNextAudioIndex())` with `ID = RootAudioClipFolder.GetAllItemsCount()`, and `Type`/`BundlingType` from the target folder's defaults unless given.
+  2. Copy the source to `AudioCache\au{Index:X6}{ext}`, and set `SourceFileName` (project-relative when inside the game folder), `FileType`, `CacheFileName` and `FileLastModifiedDate`.
+  3. `folder.Items.Add`, `FilesAddedOrRemoved = true`, delete `Compiled\Data\audio.vox`, and `AudioClipTypeConverter.SetAudioClipList(...)`.
+- **This replaces hand-patching `Game.agf`.** Before these tools, an agent had to add `<AudioClip>` nodes and bump `<AudioIndexer>` by hand, copy the cache file, then reload the project without letting the editor save over the edit.
+- **The audio tools refresh the editor's Audio tree** (`IRePopulatableComponent.RePopulateTreeView` on the component with ID `"AudioNew"`) and regenerate the script header, so a new `aName` autocompletes at once. That makes them an exception to the "no tree refresh" gap.
+- **Sources stay where they are.** A `path` import does not copy the file into the project. A `base64` upload is written to `<game>\Audio\<fileName>` and never overwrites an existing file, except the clip's own source on `replace_audio`.
+- **`replace_audio` keeps `ScriptName`, `ID` and `Index`.** Without a new file, it re-copies the current source into the cache, as the editor's "Force reimport" does.
+- **`delete_audio` refuses while the clip is in use**, unless `force=true`. Uses are view frames whose `Sound` is the clip's `Index`, `Settings.PlaySoundOnScore`, and a whole-word script name match in modules, headers and room scripts. Like the editor, it decrements higher clip `ID`s and deletes the cache file. Indexes never change.
+- **Audio types are the `audiocliptype` entity kind.** `TypeID` is `[ReadOnly]`, so `set_properties` cannot change it. Create appends `Count + 1`. Delete refuses for the last type, a type used by a clip, or a folder's `DefaultType`; otherwise it renumbers higher `TypeID`s on the types, clips and folders. The editor does not renumber folder defaults.
+- **Making sound is the skill's job.** `skills/ags-mcp/scripts/sfx.py` synthesises WAVs (numpy: oscillators, modal synthesis, FFT-shaped noise, reverb, seamless-loop helpers, checks, spectrogram previews), and the agent imports them. The server stays a thin editor bridge.
+
 ### Build and run
 - **`build_game` runs `CompileGame` on the main-window thread with `MessageBoxOnCompile = Never`**, then restores the setting. `CompileGame` touches the output panel and can pop a modal "compilation errors" box (`ReportErrorsIfAppropriate`) that would hang an unattended session. Messages come back in the same shape as `compile`.
 - **`run_game` builds and launches the full standalone exe** (`Compiled\Windows\<name>.exe`), not the editor's `_Debug` mini-exe. The mini-exe needs `--runfromide <Compiled\Windows> <asset-dir maps> <exe>` to find its assets; the standalone exe runs with no path mapping.
@@ -156,16 +169,17 @@ src/AgsMcp.Editor/
 
 - No `delete_room` or room renumbering.
 - GUI **controls** cannot be created, deleted, read or written (GUIs themselves can).
-- Fonts and audio clips cannot be created (they are backed by resource files); list, get and set work.
+- Fonts cannot be created (they are backed by resource files); list, get and set work.
+- Audio folders cannot be created, moved or renamed. `import_audio` places clips into existing folders only.
 - 8-bit backgrounds cannot be imported into 256-colour games.
 - No automatic backup of `Game.agf` before the first write of a session.
-- Game-data, sprite and new-module changes do not refresh the editor's project tree or open panes until the next reload.
+- Game-data, sprite and new-module changes do not refresh the editor's project tree or open panes until the next reload. The audio tools are the exception.
 - `open_project` cannot reopen the game that is already open (`_OpenInEditor.lock`); reloading from disk means restarting the editor.
 - The editor-debugger named pipes (`--enabledebugger <token>`) are not hosted, so runtime errors come only from the engine log, without call stacks.
 
 ## Testing
 
-- **Unit tests:** `.\build.ps1 -Test` (xUnit, `tests/AgsMcp.Editor.Tests`). They cover JSON-RPC handling, the HTTP transport, script text edits, property reflection and conversion, room entity refs, mask shapes and polygon scanlines, sprite transparency and view parsing, engine arguments and log slicing, key mapping and wait conditions.
+- **Unit tests:** `.\build.ps1 -Test` (xUnit, `tests/AgsMcp.Editor.Tests`). They cover JSON-RPC handling, the HTTP transport, script text edits, property reflection and conversion, room entity refs, mask shapes and polygon scanlines, sprite transparency and view parsing, audio file types, cache names, script names and usage matching, engine arguments and log slicing, key mapping and wait conditions.
 - **Live check:** run `.\build.ps1 -Deploy -Run`, then call the tools over HTTP:
   ```powershell
   Invoke-WebRequest http://127.0.0.1:7471/mcp -Method Post -ContentType application/json `
@@ -174,7 +188,7 @@ src/AgsMcp.Editor/
   Or use the MCP Inspector CLI:
   `npx -y @modelcontextprotocol/inspector --cli http://127.0.0.1:7471/mcp --transport http --method tools/list`
   When a call fails, read `%APPDATA%\AGS-MCP\plugin.log`.
-- **Smoke test:** `tests/smoke/smoke.ps1`, run after `.\build.ps1 -Engine -Deploy -Run`. It creates a throwaway game from the Sierra-style template in a temp folder (`create_project`) and drives every tool group against it over HTTP: a compile error and its fix, a property round-trip, room authoring on a probe room, `render_room`, `import_sprite`, `create_view` in its schema form, a character event, dialog options, `build_game`, `run_game`, the `game_*` tools including a queued `game_process_click` and `game_wait_until ready`, and `stop_game`. It reports pass/fail counts and exits non-zero on failure.
+- **Smoke test:** `tests/smoke/smoke.ps1`, run after `.\build.ps1 -Engine -Deploy -Run`. It creates a throwaway game from the Sierra-style template in a temp folder (`create_project`) and drives every tool group against it over HTTP: a compile error and its fix, a property round-trip, room authoring on a probe room, `render_room`, `import_sprite`, `create_view` in its schema form, the audio tools (import by path and base64, an `audiocliptype` round-trip, the in-use refusal, a script that plays the clip, `replace_audio`, `delete_audio`), a character event, dialog options, `build_game`, `run_game`, the `game_*` tools including a queued `game_process_click` and `game_wait_until ready`, and `stop_game`. It reports pass/fail counts and exits non-zero on failure.
   - Because it works on its own game, no existing game is modified. Afterwards it reopens the game that was open (`open_project`, discarding the throwaway game's unsaved state) and deletes the temp folder. The game open at the start is saved first, as File > New Game does. `-Keep` leaves the throwaway game open for inspection.
 
 ## AGS reference
@@ -227,6 +241,23 @@ Verified facts about AGS 3.6.2 internals. Source paths are relative to the AGS s
 - **Sprite model:** `Game.RootSpriteFolder` is a `SpriteFolder` with `Name`, `Sprites`, `SubFolders`, `FindSpriteByID(int, bool recursive)`, `FindFolderThatContainsSprite(int)`, `CountSpritesInAllSubFolders()` and a `SpritesUpdated` event. There is no name-to-folder lookup; recurse `SubFolders` by `Name`. `Sprite`: `Number`, read-only `Width`/`Height`, `ColorDepth`, `AlphaChannel`, `SourceFile`, `TransparentColour`. `SpriteImportTransparency`: `PaletteIndex0, TopLeft, BottomLeft, TopRight, BottomRight, LeaveAsIs, NoTransparency, PaletteIndex`.
 - **View model:** `new View()`, `View.AddNewLoop() → ViewLoop`, `View.Loops`. `ViewLoop`: `RunNextLoop`, `Frames`. `ViewFrame`: `Image` (sprite number, clamped to ≥0), `Delay`, `Flipped`, `Sound` (default `AudioClip.FixedIndexNoValue`). Allocate the ID with `Game.FindAndAllocateAvailableViewID()`, then `Game.RootViewFolder.Items.Add(view)`.
 
+### Audio
+- **`AudioClip`** (`Editor/AGS.Types/AudioClip.cs`): the constructor is `(string scriptName, int fixedIndex)`, with no parameterless one.
+  - `Index` is the clip's fixed ID. It never changes, `FixedIndexBase` = 1, and 0 means none. View frames' `Sound` and `Settings.PlaySoundOnScore` store it.
+  - `ID` is the 0-based position in the flat list; the build writes clips by it.
+  - Other members: `ScriptName` (the setter validates), `SourceFileName`, `Type` (`int`, an `AudioClipType.TypeID`), `BundlingType` (`InGameEXE`/`InSeparateVOX`), `FileType`, `DefaultVolume` (−1..100, −1 inherits), `DefaultPriority`, `DefaultRepeat` (`InheritableBool`).
+  - `CacheFileName`, `FileLastModifiedDate` and the `Actual*` values are `[AGSNoSerialize]`; `ToXml` writes the date by hand.
+- **Cache file:** `AudioComponent.GetCacheFileName` = `AudioCache\` + `"au" + Index.ToString("X6") + Path.GetExtension(SourceFileName)`, for example Index 26 with `x.ogg` gives `au00001A.ogg`. It is recomputed on every load (`ApplicationController._events_GamePostLoad`) and never saved. **The build packs only the cache copy** (`BuildTargetDataFile`, `DataFileWriter`).
+- **Source re-copy:** before each build, `AudioComponent._agsEditor_PreCompileGame` copies a clip's source over its cache file when the source exists and the write times differ (or on a rebuild), so regenerating a source in place needs no re-import. A missing source with a missing cache stops the build. `File.Copy` keeps the write time.
+- **`Game.GetNextAudioIndex()`** is `++Settings.AudioIndexer`, saved in `Game.agf`. `Game.RootAudioClipFolder` is an `AudioClipFolder` (`DefaultType`, default 1; `DefaultBundlingType`, `DefaultVolume`, `DefaultPriority`, `DefaultRepeat`; `GetAllAudioClipsFromAllSubFolders()`). `Game.AudioClips` is a `FolderListHybrid` whose flat list follows `folder.Items.Add`/`Remove` through `OnFolderChange`.
+- **Extensions to `AudioClipFileType`:** `.ogg` OGG, `.mp3` MP3, `.wav` WAV, `.voc` VOC, `.mid` MIDI; `.mod`, `.xm`, `.s3m` and `.it` map to MOD.
+- **Audio types:** `AudioClipType(typeID, name, maxChannels, volumeReductionWhileSpeechPlaying, backwardsCompatType, CrossfadeSpeed)`; `ScriptID` = `eAudioType` + the name without non-word characters.
+  - The defaults are 1 Ambient Sound (`MaxChannels` 1), 2 Music (1, speech reduction 30) and 3 Sound (0 = unlimited).
+  - `DataFileWriter` writes types by list position after a hard-coded speech type 0, so `TypeID`s must stay 1..N.
+  - After a change, call `AudioClipTypeTypeConverter.RefreshAudioClipTypeList()`.
+- **Script names:** `_AutoGenerated.ash` gets `import AudioClip aName;` per clip from `Tasks.RegenerateScriptHeader`. The editor names an imported file with `RemoveInvalidCharactersFromScriptName`, then `"a"` and a capitalised first letter, numbered until `IsScriptNameAlreadyUsed` is false.
+- **Plugin API:** `IAGSEditor` has no audio API. The `AudioComponent` is internal; its ID is `"AudioNew"` and it implements the public `IRePopulatableComponent`. `AGS.Editor.ComponentController.Instance.Components` lists it. `AudioComponent`'s private `DeleteAudioClip` decrements higher IDs, deletes the cache file and `audio.vox`, and sets `FilesAddedOrRemoved`.
+
 ### Build and run
 - `AGSEditor.Instance.CompileGame(bool forceRebuild, bool createMiniExeForDebug) → CompileMessages`. `false` makes a full standalone build; `true` makes the `_Debug` mini-exe. It starts with `ClearOutputPanel()` and ends with `ShowOutputPanel`/`ReportErrorsIfAppropriate`, which shows a modal box unless `AGSEditor.Instance.Settings.MessageBoxOnCompile` (enum in `AGS.Editor.Preferences`) is `Never`. Scripts compile inside a `BusyDialog`.
 - **Paths:** `AGSEditor.OUTPUT_DIRECTORY = "Compiled"`, `DEBUG_OUTPUT_DIRECTORY = "_Debug"`, `BuildTargetWindows.WINDOWS_DIRECTORY = "Windows"`. The standalone exe is `<GameDirectory>\Compiled\Windows\<BaseGameFileName>.exe`; `BaseGameFileName` is `Settings.GameFileName` or the folder name.
@@ -257,4 +288,4 @@ Verified facts about AGS 3.6.2 internals. Source paths are relative to the AGS s
 - **Installer:** `install.ps1` runs under Windows PowerShell 5.1 through `irm | iex`, so it keeps all logic in functions, never calls `exit`, and leaves the caller's preferences alone. It finds AGS through a running editor, the uninstall registry keys and `Program Files` (a portable AGS needs `-AgsDir`), refuses while that editor runs, and `Unblock-File`s the copied DLLs.
 - AGS release: https://github.com/adventuregamestudio/ags/releases/tag/v3.6.2.21. Use `AGS-3.6.2.21-P11.zip` for the editor and `ags_3.6.2.21_source.zip` for the source.
 - **Engine plugin build:** `build.ps1 -Engine` wraps `cmake -S src\AgsMcp.Engine -B build -A Win32` and `cmake --build build --config Release`. VS 2022 bundles CMake at `...\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`. `-Deploy` copies `agsmcp.dll` into the editor folder next to `AGS.Plugin.Mcp.dll`.
-- **Agent skill:** `skills/ags-mcp/` (SKILL.md, references and `scripts/pixelart.py`) teaches working on the user's open game through these tools and checking changes in it with the `game_*` tools. It never creates a separate test game, and its text is client-neutral (tool names without a client prefix). Agents that load `SKILL.md` skills get it from their skills folder (`install.ps1 -InstallSkill [-SkillDir]`); others are pointed at it from their instructions file. Its eval harness lives in `skills/ags-mcp-workspace/` (git-ignored).
+- **Agent skill:** `skills/ags-mcp/` (SKILL.md, references, `scripts/pixelart.py` and `scripts/sfx.py`) teaches working on the user's open game through these tools and checking changes in it with the `game_*` tools. It never creates a separate test game, and its text is client-neutral (tool names without a client prefix). Agents that load `SKILL.md` skills get it from their skills folder (`install.ps1 -InstallSkill [-SkillDir]`); others are pointed at it from their instructions file. Its eval harness lives in `skills/ags-mcp-workspace/` (git-ignored).

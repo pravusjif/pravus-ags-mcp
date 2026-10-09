@@ -174,7 +174,8 @@ namespace AgsMcp.Editor.Tools
                 },
                 new EntityKind
                 {
-                    // Fonts and audio clips are backed by resource files, so creating them belongs with assets (M5).
+                    // Fonts and audio clips are backed by resource files: audio clips are created by import_audio
+                    // (AudioTools); fonts cannot be created yet.
                     Name = "font", NameProperty = null,
                     Enumerate = g => g.Fonts.Cast<object>(),
                     IdOf = e => ((Font)e).ID.ToString(),
@@ -186,6 +187,44 @@ namespace AgsMcp.Editor.Tools
                     Enumerate = g => g.AudioClipFlatList.Cast<object>(),
                     IdOf = e => ((AudioClip)e).ID.ToString(),
                     NameOf = e => ((AudioClip)e).ScriptName,
+                },
+                new EntityKind
+                {
+                    // Audio types (Sound, Music, Ambient Sound...). TypeIDs must stay 1..N: the build writes types by
+                    // position. Mirrors AudioComponent.CreateNewAudioClipType / DeleteAudioClipType.
+                    Name = "audiocliptype", NameProperty = null,
+                    Enumerate = g => g.AudioClipTypes.Cast<object>(),
+                    IdOf = e => ((AudioClipType)e).TypeID.ToString(),
+                    NameOf = e => ((AudioClipType)e).Name,
+                    Create = (g, p) =>
+                    {
+                        string name = RequireName(p);
+                        if (g.AudioClipTypes.Any(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)))
+                            throw new ToolException($"An audio type named '{name}' already exists.");
+                        var type = new AudioClipType(g.AudioClipTypes.Count + 1, name, 0, 0, false, CrossfadeSpeed.No);
+                        g.AudioClipTypes.Add(type);
+                        AfterAudioTypesChanged();
+                        return type;
+                    },
+                    Delete = (g, e) =>
+                    {
+                        var type = (AudioClipType)e; int id = type.TypeID;
+                        if (g.AudioClipTypes.Count <= 1)
+                            throw new ToolException("A game needs at least one audio type.");
+                        int clips = g.AudioClipFlatList.Count(c => c.Type == id);
+                        if (clips > 0)
+                            throw new ToolException($"Audio type '{type.Name}' is used by {clips} audio clip(s); change their Type first.");
+                        var folders = new List<AudioClipFolder>();
+                        CollectAudioFolders(g.RootAudioClipFolder, folders);
+                        string usedBy = string.Join(", ", folders.Where(f => f.DefaultType == id).Select(f => f.Name));
+                        if (usedBy.Length > 0)
+                            throw new ToolException($"Audio type '{type.Name}' is the default type of folder(s) {usedBy}; change their DefaultType first.");
+                        g.AudioClipTypes.Remove(type);
+                        foreach (AudioClipType t in g.AudioClipTypes) if (t.TypeID > id) t.TypeID--;
+                        foreach (AudioClip c in g.AudioClipFlatList) if (c.Type > id) c.Type--;
+                        foreach (AudioClipFolder f in folders) if (f.DefaultType > id) f.DefaultType--;
+                        AfterAudioTypesChanged();
+                    },
                 },
                 new EntityKind
                 {
@@ -241,6 +280,18 @@ namespace AgsMcp.Editor.Tools
                 },
             };
             return kinds.ToDictionary(k => k.Name, k => k);
+        }
+
+        private static void AfterAudioTypesChanged()
+        {
+            AudioClipTypeTypeConverter.RefreshAudioClipTypeList();
+            EditorInternals.RefreshAudioTree();
+        }
+
+        private static void CollectAudioFolders(AudioClipFolder folder, List<AudioClipFolder> into)
+        {
+            into.Add(folder);
+            foreach (AudioClipFolder sub in folder.SubFolders) CollectAudioFolders(sub, into);
         }
 
         private static string RequireName(JObject props)

@@ -43,6 +43,24 @@ function Get-Text { param($Result) ($Result.content | Where-Object { $_.type -eq
 function Get-Json { param($Result) Get-Text $Result | ConvertFrom-Json }
 function Has-Image { param($Result) [bool]($Result.content | Where-Object { $_.type -eq "image" }) }
 
+# A short fading sine as a 16-bit mono 22050 Hz PCM WAV.
+function New-TestWav {
+    param([string]$Path, [double]$Hz, [int]$Milliseconds)
+    $rate = 22050
+    $count = [int]($rate * $Milliseconds / 1000)
+    $buf = New-Object IO.MemoryStream
+    $w = New-Object IO.BinaryWriter($buf)
+    $w.Write([Text.Encoding]::ASCII.GetBytes("RIFF")); $w.Write([int](36 + $count * 2)); $w.Write([Text.Encoding]::ASCII.GetBytes("WAVEfmt "))
+    $w.Write([int]16); $w.Write([int16]1); $w.Write([int16]1); $w.Write([int]$rate); $w.Write([int]($rate * 2)); $w.Write([int16]2); $w.Write([int16]16)
+    $w.Write([Text.Encoding]::ASCII.GetBytes("data")); $w.Write([int]($count * 2))
+    for ($i = 0; $i -lt $count; $i++) {
+        $w.Write([int16](12000 * (1 - $i / $count) * [Math]::Sin(2 * [Math]::PI * $Hz * $i / $rate)))
+    }
+    $w.Flush()
+    [IO.File]::WriteAllBytes($Path, $buf.ToArray())
+    $w.Dispose()
+}
+
 function Check {
     param([string]$Label, [scriptblock]$Test)
     try {
@@ -208,6 +226,66 @@ try {
         Invoke-Mcp "delete_entity" @{ type = "view"; id = "vSmoke" } | Out-Null
         $ok
     }
+
+    # ---- Audio ----
+    Write-Host "Audio" -ForegroundColor Cyan
+    $wavPath = Join-Path $Folder "smoke_beep.wav"
+    New-TestWav $wavPath 880 200
+    $beep = $null
+    $tone = $null
+    Check "import_audio by path creates a Sound clip and its AudioCache copy" {
+        $script:beep = Get-Json (Invoke-Mcp "import_audio" @{ path = $wavPath; name = "aSmokeBeep"; type = "Sound" })
+        $script:beep.created -and $script:beep.typeName -eq "Sound" -and $script:beep.sourceFileName -eq "smoke_beep.wav" -and
+            (Test-Path (Join-Path $Folder $script:beep.cacheFile))
+    }
+    Check "import_audio from base64 saves to Audio\ and derives the script name" {
+        $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($wavPath))
+        $script:tone = Get-Json (Invoke-Mcp "import_audio" @{ base64 = $b64; fileName = "smoke_tone.wav" })
+        $script:tone.scriptName -eq "aSmoke_tone" -and $script:tone.index -eq ($script:beep.index + 1) -and
+            (Test-Path (Join-Path $Folder "Audio\smoke_tone.wav"))
+    }
+    Check "list_entities and get_properties see the clip and its cache file" {
+        $l = Get-Json (Invoke-Mcp "list_entities" @{ type = "audioclip" })
+        $p = (Get-Json (Invoke-Mcp "get_properties" @{ type = "audioclip"; id = "aSmokeBeep" })).properties
+        $cache = ($p | Where-Object { $_.name -eq "CacheFileNameWithoutPath" }).value
+        (($l | ConvertTo-Json -Depth 10) -match "aSmoke_tone") -and $cache -eq (Split-Path -Leaf $script:beep.cacheFile)
+    }
+    Check "audiocliptype: set MaxChannels, create and delete a type" {
+        $read = { ((Get-Json (Invoke-Mcp "get_properties" @{ type = "audiocliptype"; id = "Ambient Sound" })).properties | Where-Object { $_.name -eq "MaxChannels" }).value }
+        $before = & $read
+        Invoke-Mcp "set_properties" @{ type = "audiocliptype"; id = "Ambient Sound"; properties = @{ MaxChannels = 3 } } | Out-Null
+        $after = & $read
+        Invoke-Mcp "set_properties" @{ type = "audiocliptype"; id = "Ambient Sound"; properties = @{ MaxChannels = $before } } | Out-Null
+        $t = Get-Json (Invoke-Mcp "create_entity" @{ type = "audiocliptype"; properties = @{ Name = "SmokeType" } })
+        $d = Get-Json (Invoke-Mcp "delete_entity" @{ type = "audiocliptype"; id = "SmokeType" })
+        $after -eq 3 -and $t.id -ne $null -and $d.deleted
+    }
+    Check "a script that plays the clip compiles" {
+        Invoke-Mcp "write_script" @{ name = "McpSmoke"; text = "// fixed`r`nint ok_value = 1;`r`nfunction SmokePlay() { aSmokeBeep.Play(); }" } | Out-Null
+        (Get-Json (Invoke-Mcp "compile")).ok -eq $true
+    }
+    Check "delete_audio refuses while a view frame or a script uses the clip" {
+        $loops = @(@{ frames = @(@{ sprite = $script:newSprite; sound = $script:tone.index }) })
+        Invoke-Mcp "create_view" @{ name = "vSmokeSnd"; loops = $loops } | Out-Null
+        $refusedView = $false; $refusedScript = $false
+        try { Invoke-Mcp "delete_audio" @{ clip = "aSmoke_tone" } | Out-Null } catch { $refusedView = $_.Exception.Message -match "vSmokeSnd" }
+        try { Invoke-Mcp "delete_audio" @{ clip = "aSmokeBeep" } | Out-Null } catch { $refusedScript = $_.Exception.Message -match "McpSmoke" }
+        $refusedView -and $refusedScript
+    }
+    Check "replace_audio re-copies the source and switches files, keeping the index" {
+        $a = Get-Json (Invoke-Mcp "replace_audio" @{ clip = "aSmokeBeep" })
+        $other = Join-Path $Folder "smoke_low.wav"
+        New-TestWav $other 220 300
+        $b = Get-Json (Invoke-Mcp "replace_audio" @{ clip = "aSmoke_tone"; path = $other })
+        $a.replaced -and $b.index -eq $script:tone.index -and $b.sourceFileName -eq "smoke_low.wav" -and
+            (Get-Item (Join-Path $Folder $b.cacheFile)).Length -eq (Get-Item $other).Length
+    }
+    Check "delete_audio force removes the clip and its cache copy" {
+        $d = Get-Json (Invoke-Mcp "delete_audio" @{ clip = "aSmoke_tone"; force = $true })
+        Invoke-Mcp "delete_entity" @{ type = "view"; id = "vSmokeSnd" } | Out-Null
+        $d.deleted -and -not (Test-Path (Join-Path $Folder $script:tone.cacheFile))
+    }
+
     Check "delete_sprite removes the imported sprite" {
         $r = Get-Json (Invoke-Mcp "delete_sprite" @{ number = $script:newSprite })
         $r -ne $null
@@ -216,6 +294,7 @@ try {
     # ---- Build ----
     Write-Host "Build" -ForegroundColor Cyan
     Check "build_game succeeds" { (Get-Json (Invoke-Mcp "build_game" @{} 300)).ok -eq $true }
+    Check "the build kept the imported clip's AudioCache copy" { Test-Path (Join-Path $Folder $script:beep.cacheFile) }
 
     # ---- Run + player simulation ----
     Write-Host "Run and player simulation" -ForegroundColor Cyan
