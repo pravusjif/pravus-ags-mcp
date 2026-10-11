@@ -6,7 +6,7 @@ noise and a noise-tail reverb cover most adventure-game sounds. Seed the RNG so 
 identically.
 
     from sfx import (RATE, seed, n, note, osc, sweep, modes, noise, burst, creak, adsr, fade, lfo,
-                     loop_safe, mix, place, reverb, level, check_oneshot, check_loop, write_wav)
+                     loop_safe, mix, place, reverb, level, limit, check_oneshot, check_loop, write_wav)
 
 Loops: build them from parts that are periodic over the loop length -- noise(..., circular=True),
 lfo(length, whole_cycles), tones at loop_safe(hz, length), place(..., wrap=True) and
@@ -205,15 +205,33 @@ def db(v):
     return 20 * np.log10(max(float(v), 1e-12))
 
 
-def level(x, rms_db=None, peak_db=-3.0, remove_dc=False):
+def limit(x, ceiling_db=-1.0, knee=0.6):
+    """Soft limiter: linear below knee * ceiling, a tanh curve from there up to the ceiling.
+    Per-sample (no look-ahead), so a seamless loop stays seamless. Lets dense music reach a loud RMS
+    without its few tall peaks pulling the whole clip down."""
+    x = np.asarray(x, dtype=float)
+    c = 10 ** (ceiling_db / 20)
+    k = knee * c
+    a = np.abs(x)
+    over = a > k
+    a[over] = k + (c - k) * np.tanh((a[over] - k) / (c - k))
+    return np.sign(x) * a
+
+
+def level(x, rms_db=None, peak_db=-3.0, remove_dc=False, soft=False):
     """Scale to an RMS target (if given) without letting the peak pass peak_db; else peak to peak_db.
-    Rough targets: one-shots peak -3 dBFS; music RMS about -24; ambience beds RMS -26 to -32.
+    With soft=True the RMS target wins and peaks above peak_db are soft-limited (limit()) instead of
+    scaling the whole clip down; keep that to a few dB of limiting or the sound thickens.
+    Render loud: in any engine, volume only turns a clip down. Starting targets (tuned by ear in one
+    engine; check in yours): one-shots peak -3 to -1 dBFS; music RMS -18 to -14; beds RMS -26 to -20.
     remove_dc subtracts the mean first (for loops with an offset; on a one-shot it lifts the faded ends off zero)."""
     x = np.asarray(x, dtype=float)
     if remove_dc:
         x = x - np.mean(x)
     if rms_db is not None:
         x = x * (10 ** (rms_db / 20) / (np.sqrt(np.mean(x ** 2)) + 1e-12))
+        if soft:
+            return limit(x, peak_db)
         ceiling = 10 ** (peak_db / 20)
         peak = np.max(np.abs(x))
         if peak > ceiling:
@@ -341,7 +359,7 @@ def demo(folder):
     loop = 4.0
     bed = noise(loop, 60, 900, tilt=1.0, circular=True) * (0.6 + 0.4 * lfo(loop, 2))
     bed += 0.3 * osc(loop_safe(55, loop), loop) * lfo(loop, 1, 1.0)
-    bed = level(reverb(bed, 1.2, 0.4, circular=True), rms_db=-28)
+    bed = level(reverb(bed, 1.2, 0.4, circular=True), rms_db=-22)
 
     made = {"demo_blip.wav": (blip, check_oneshot), "demo_knock.wav": (knock, check_oneshot),
             "demo_roomtone.wav": (bed, check_loop)}

@@ -56,25 +56,32 @@ bed += 0.3 * osc(loop_safe(55, L), L) * lfo(L, 1, 1.0)     # hum, rounded to who
 drip = modes([1800], [0.05], [1], 0.3)
 for at in (1.3, 5.9, 10.4):
     place(bed, 0.4 * drip, at, wrap=True)                  # events near the end wrap to the start
-bed = level(reverb(bed, 1.5, 0.4, circular=True), rms_db=-28)
+bed = level(reverb(bed, 1.5, 0.4, circular=True), rms_db=-22)
 check_loop(bed)
 ```
 
 **Music.** Build notes with `note("D4")`, voice them with `modes()` (plucked or bell-like) or stacked `osc()` partials times `adsr()` (pads, organ), and `place()` them on a beat grid (`step = 60 / bpm`).
-- **Looping cues:** make the length a whole number of bars, use `wrap=True` and a circular reverb.
+- **Looping cues:** make the length a whole number of bars, use `wrap=True` and a circular reverb, then `level(x, rms_db=-16, peak_db=-1, remove_dc=True, soft=True)`.
 - **Stingers** (one-shots): fade the end and leave room for the tail.
 
 ## Levels
 
+**Render loud; the engine can only turn a clip down.** This holds in any engine: clip and channel volume top out at full (100 in AGS; 1 in Unity and the Decentraland Explorer), so a quiet file stays quiet however high the script sets it. Bake the loudness into the file, then trim in the game: in AGS a folder `DefaultVolume` around 70 leaves room to go up as well as down.
+
 - `level(x)` peaks a one-shot at −3 dBFS.
-- `level(x, rms_db=...)` sets loudness for beds and music, with the peak still capped.
+- `level(x, rms_db=...)` sets loudness for beds and music, with the peak still capped. Music's peaks sit 10–17 dB above its RMS, so at the louder targets below the cap stops it short.
+- `level(x, rms_db=..., soft=True)` lets the RMS target win and soft-limits the peaks (`limit()`, per-sample, so loops stay seamless). Use it for music. A few dB of limiting is hard to hear; much more thickens the sound.
+
+**The numbers are a starting point, not a standard.** They were tuned by ear in one game played in the Decentraland Explorer, where music rendered at RMS −24 to −28 was too quiet even at full volume. They have not been checked by ear in an AGS game: generate, play the game, and adjust. The relations between them (beds under music, one-shots heard over it) matter more than the exact values.
 
 | Kind | Target |
 |---|---|
 | UI blips, small props | peak −6 to −3 |
-| Doors, hits, events | peak −3 |
-| Music | RMS ≈ −24 |
-| Ambience beds | RMS −26 to −32, under the music and the dialogue |
+| Doors, hits, events | peak −3 to −1 |
+| Music | RMS −18 to −14 (`soft=True`, peak −1) |
+| Ambience beds | RMS −26 to −20, under the music and the dialogue |
+
+**Check one-shots' RMS, not only their peak.** A sharp click or card snap peaked at −3 can sit at RMS −26 and vanish under music at −16. Give such sounds a short `level(x, rms_db=-20, peak_db=-1, soft=True)`.
 
 A consistent set matters more than the exact numbers: generate siblings in one script and print their `stats()`.
 
