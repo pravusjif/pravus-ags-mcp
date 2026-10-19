@@ -11,6 +11,15 @@ It ships as two DLLs that you copy into the AGS folder — nothing else to insta
 - `agsmcp.dll` — an optional native engine plugin. Only needed for the player-simulation (`game_*`) tools;
   inert unless the editor plugin launches the game.
 
+<p align="center">
+  <img src="docs/images/title.png" width="640" alt="Title screen: a mansion on a rocky island at night, a causeway of lanterns across the sea, and a menu">
+</p>
+<p align="center">
+  <img src="docs/images/foyer.png" width="400" alt="The foyer: a red-carpeted grand stair, with the player character's narration about the room">
+  <img src="docs/images/library.png" width="400" alt="The library: walls of bookshelves, a lit lamp on a table and a red rug">
+</p>
+<p align="center"><em>Mansion of Cosmic Horrors, an AGS game made by an AI agent working through this server.</em></p>
+
 ## Status
 
 The server covers project creation, scripts, game data, GUI controls, fonts and text measurement, room authoring
