@@ -43,6 +43,7 @@ A key a tool does not take is refused with the list of the ones it does.
 | `edit_script name find replace [header] [all]` | Exact, newline-agnostic find/replace; `find` must occur exactly once unless `all=true` (include a comment or the function header to make it unique). Saves. |
 | `reload_script name` | Replaces the editor's copy with the file on disk: a module's header and body, or `roomN`. Discards unsaved in-memory edits to it; refuses a room whose other changes are unsaved. Returns `files:[{file, lines, changed}]`. |
 | `create_script_module name [headerText scriptText]` | New `.asc`/`.ash` pair, placed just above GlobalScript so GlobalScript can use its header (a script sees only the headers above it). Needs `save_project` to be recorded in `Game.agf`. |
+| `move_script_module name direction [index]` | `direction` is `up`, `down` or `index` (with `index`, 0 = first). Use it when a module needs a header from one below it. Refuses GlobalScript and projects with script folders. Returns the new `order`; `save_project` to keep it. |
 | `compile [name]` | No name: all modules. `name=roomN` compiles the room script with its generated header (hotspot/object names). Regenerates the auto-generated header first, so names from a `create_entity`/`create_view` made moments ago resolve. Returns `{ok, errors, warnings, messages:[{severity, script, line, message}], staleOnDisk:[file]}`; a file in `staleOnDisk` was edited on disk and not compiled, so `reload_script` it and compile again. |
 | `script_api_lookup query` | Signatures and docs from the built-in header and project headers. It can list functions the project's Script API level hides, so a listed name is not a guarantee it compiles. |
 
@@ -70,6 +71,8 @@ All room tools load the room in the editor (switching away from whatever was loa
 | Tool | Notes |
 |---|---|
 | `import_sprite path\|base64 [folder] [transparency] [alpha]` | Returns `{number, width, height}`. Default transparency `LeaveAsIs` keeps PNG alpha in 32-bit games. Write the returned numbers down; they are what `Image`, views and `Graphic` refer to. |
+| `list_sprites [folder] [flat]` | Folder tree `{name, sprites:[{number, width, height, colorDepth, alphaChannel}], folders}`; `flat=true` gives one list sorted by number. Folder names are what `import_sprite folder` takes. |
+| `create_sprite_folder name [parent]` | Folder names are unique across the project (a taken name gets a number appended; use the returned `name`). `save_project` to keep it. |
 | `get_sprite number [outPath]` | PNG; use it to see what an existing sprite looks like. `outPath` (absolute) writes the file and returns `{path, width, height, note}` only. |
 | `replace_sprite number path\|base64` | Keeps the number, so references stay valid. Use it to iterate on art. |
 | `delete_sprite number` | Refuses with a usage report if a view/object/character still uses it. |

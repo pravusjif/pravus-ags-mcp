@@ -23,6 +23,7 @@ namespace AgsMcp.Editor.Tools
             yield return EditScript(ctx);
             yield return ReloadScript(ctx);
             yield return CreateScriptModule(ctx);
+            yield return MoveScriptModule(ctx);
             yield return Compile(ctx);
             yield return ScriptApiLookup(ctx);
         }
@@ -240,6 +241,56 @@ namespace AgsMcp.Editor.Tools
                     script = created.Script?.FileName,
                     position = game.ScriptsAndHeaders.ToList().IndexOf(created),
                     created = true,
+                });
+            },
+        };
+
+        private static Tool MoveScriptModule(ToolContext ctx) => new Tool
+        {
+            Name = "move_script_module",
+            Title = "Move script module",
+            Description = "Change a module's place in the compile order (the list_scripts order). A module sees only the " +
+                          "headers of the modules above it, so a module whose header another uses must sit above it. " +
+                          "direction=up/down moves one place; direction=index moves to 'index' (0 = first). GlobalScript cannot " +
+                          "be moved, and projects with script folders are refused (the flat order and the folder tree would " +
+                          "disagree). Returns the new order; call save_project to persist it.",
+            InputSchema = Schema.Object()
+                .Required("name", Schema.String("Module name, e.g. \"Utils\"."))
+                .Required("direction", Schema.String("Where to move it.", "up", "down", "index"))
+                .Optional("index", Schema.Integer("Target position (0-based) when direction=index."))
+                .Build(),
+            Annotations = ToolAnnotations.Mutating,
+            Handler = args =>
+            {
+                Game game = ctx.RequireGame();
+                string direction = args.String("direction");
+                if (direction == "index" && !args.Has("index")) throw new ToolException("direction=index needs 'index'.");
+                if (game.RootScriptFolder.SubFolders.Count > 0)
+                    throw new ToolException("This project has script folders; reorder its modules in the editor's project tree. " +
+                                            "move_script_module only works on projects without script folders.");
+                string name = args.String("name").Trim();
+                if (name.EndsWith(".asc", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ash", StringComparison.OrdinalIgnoreCase))
+                    name = Path.GetFileNameWithoutExtension(name);
+                ScriptAndHeader module = FindModule(game, name);
+                if (module.Script != null && module.Script.FileName == Script.GLOBAL_SCRIPT_FILE_NAME)
+                    throw new ToolException("GlobalScript cannot be moved; move the other modules around it.");
+
+                ScriptsAndHeaders all = game.ScriptsAndHeaders;
+                int from = all.ToList().IndexOf(module);
+                int steps = ModuleOrder.Plan(all.Count, from, direction, args.Int("index", -1));
+                for (int i = 0; i < Math.Abs(steps); i++)
+                {
+                    if (steps < 0) all.MoveScriptAndHeaderUp(module);
+                    else all.MoveScriptAndHeaderDown(module);
+                }
+                if (steps != 0) game.FilesAddedOrRemoved = true;
+                return ToolResult.Json(new
+                {
+                    name = ModuleName(module),
+                    from,
+                    to = all.ToList().IndexOf(module),
+                    moved = steps != 0,
+                    order = all.Select(ModuleName).ToList(),
                 });
             },
         };

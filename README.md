@@ -196,6 +196,7 @@ take is refused, with the list of the ones it does.
 | `edit_script(name, find, replace, [header], [all])` | Exact find/replace (newline-agnostic). |
 | `reload_script(name)` | Replace the editor's copy of a module (header and body) or room script with the file on disk, after an outside edit. |
 | `create_script_module(name, [headerText], [scriptText])` | Create a new `.asc`/`.ash` module just above GlobalScript, so GlobalScript can use its header. |
+| `move_script_module(name, direction, [index])` | Move a module up, down or to `index` in the compile order (not GlobalScript; not in projects with script folders). |
 | `compile([name])` | Compile one module (with its preceding headers), a room script (`roomN`, with the room's hotspot/object names) or all modules; returns structured errors/warnings with file and line, and `staleOnDisk`: the input files changed on disk outside the editor. |
 | `script_api_lookup(query, [limit])` | Search the built-in API and project headers; returns signatures, source header and `///` docs. |
 
@@ -222,6 +223,8 @@ the room script.
 | Tool | Description |
 |------|-------------|
 | `import_sprite(path\|base64, [folder], [transparency], [alpha])` | Import a sprite into a folder (or the root). |
+| `list_sprites([folder], [flat])` | Sprite folder tree with each sprite's number, size, colour depth and alpha; `flat=true` lists every sprite under the folder. |
+| `create_sprite_folder(name, [parent])` | Create a sprite folder (names are unique project-wide; a taken name gets a number). |
 | `get_sprite(number, [outPath])` | Return a sprite as a PNG, or write it to `outPath`. |
 | `replace_sprite(number, path\|base64, …)` | Replace a sprite's image, keeping its number. |
 | `delete_sprite(number)` | Delete a sprite (refuses with a usage report if still referenced). |

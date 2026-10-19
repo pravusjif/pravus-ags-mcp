@@ -11,7 +11,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 - [x] 1. Housekeeping: installer repo name, package hygiene, `SmokeGame` setting, headless-compile fallback in the skill — landed in "Housekeeping: installer repo name, SmokeGame, package hygiene, headless compile"; live gate passed in "build.ps1 -Run: load SmokeGame.ps1, live gate for housekeeping".
 - [x] 2. Script hygiene: CRLF everywhere, `staleOnDisk` detection, `reload_script` — `set_dialog_script`/`set_event` write CRLF through `ScriptTools.Save`, `read_script`/`compile` report `staleOnDisk`, new `reload_script`; "Script hygiene: CRLF dialog scripts, staleOnDisk, reload_script".
 - [x] 3. `batch` tool and `outPath` on the image tools — `McpServer.InvokeTool`, `Tools/BatchTools.cs`, `Tools/ImageOutput.cs` on `render_room`/`get_sprite`/`game_screenshot`; "batch tool and outPath on the image tools".
-- [ ] 4. `list_sprites`, `create_sprite_folder`, `move_script_module`
+- [x] 4. `list_sprites`, `create_sprite_folder`, `move_script_module` — the three tools plus pure `ModuleOrder.Plan`; "list_sprites, create_sprite_folder, move_script_module".
 - [ ] 5. GUI controls: list/create/delete, `guicontrol` entity kind, GUI events in `set_event`
 - [ ] 6. Engine-plugin toggle, `build_game`/`run_game` modes, `project_info` state, run robustness
 - [ ] 7. Fonts: `create_entity font`, `import_font`
@@ -55,6 +55,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 18. (2026-10-19) `staleOnDisk` ignores newline style and trailing newlines (only a save round-trip changes those); on `compile` it is a list of stale files among the compiled bodies and all module headers, since a stale header changes the compile too.
 19. (2026-10-19) `batch` embeds a call's JSON text parsed (other text stays a string), so a reply is not JSON inside JSON strings; the batch result itself is never `isError` (per-call `ok` carries failures), and `stopped` is true only when later calls were skipped. It is annotated destructive, since its calls may be.
 20. (2026-10-19) `outPath` returns `{path, width, height, note}`: `note` keeps the text the tool returns beside the image (`render_room`'s mask legend). Parent folders are created; only rooted drive or UNC paths are accepted (`ImageOutput.IsAbsolutePath`).
+21. (2026-10-19) `create_sprite_folder` keeps names unique across the whole tree by appending a number and returning the actual name, as `create_script_module` does, rather than refusing: every sprite tool finds folders by name, first match. `move_script_module` up/down at an end is a no-op (`moved=false`), not an error.
 
 ## Verified facts (AGS 3.6.2.21 source and this repo)
 

@@ -157,6 +157,13 @@ try {
         $c = Get-Json (Invoke-Mcp "compile" @{ name = "McpSmoke" })
         $r.staleOnDisk -eq $true -and $r.text -match "fixed" -and ($c.staleOnDisk -contains "McpSmoke.asc")
     }
+    Check "move_script_module moves McpSmoke to the top and list_scripts follows" {
+        $m = Get-Json (Invoke-Mcp "move_script_module" @{ name = "McpSmoke"; direction = "index"; index = 0 })
+        $l = Get-Json (Invoke-Mcp "list_scripts")
+        $refused = $false
+        try { Invoke-Mcp "move_script_module" @{ name = "GlobalScript"; direction = "up" } | Out-Null } catch { $refused = $_.Exception.Message -match "cannot be moved" }
+        $m.to -eq 0 -and $m.moved -and $l.modules[0].name -eq "McpSmoke" -and $refused
+    }
     Check "reload_script takes the disk version and clears staleOnDisk" {
         $l = Get-Json (Invoke-Mcp "reload_script" @{ name = "McpSmoke" })
         $r = Get-Json (Invoke-Mcp "read_script" @{ name = "McpSmoke" })
@@ -257,6 +264,17 @@ try {
         $r = Get-Json (Invoke-Mcp "import_sprite" @{ base64 = $png4 })
         $script:newSprite = $r.number
         Has-Image (Invoke-Mcp "get_sprite" @{ number = $script:newSprite })
+    }
+    Check "create_sprite_folder, import_sprite into it, list_sprites shows it there" {
+        $folder = (Get-Json (Invoke-Mcp "create_sprite_folder" @{ name = "SmokeFolder" })).name
+        $again = (Get-Json (Invoke-Mcp "create_sprite_folder" @{ name = "SmokeFolder"; parent = $folder })).name
+        $n = (Get-Json (Invoke-Mcp "import_sprite" @{ base64 = $png4; folder = $folder })).number
+        $tree = Get-Json (Invoke-Mcp "list_sprites" @{ folder = $folder })
+        $flat = Get-Json (Invoke-Mcp "list_sprites" @{ flat = $true })
+        $root = Get-Json (Invoke-Mcp "list_sprites")
+        $tree.name -eq $folder -and $again -eq "${folder}1" -and ($tree.sprites | Where-Object { $_.number -eq $n -and $_.width -eq 4 }) -and
+            $tree.folders[0].name -eq $again -and ($flat.sprites.number -contains $n) -and
+            ($root.folders.name -contains $folder) -and -not ($root.sprites.number -contains $n)
     }
     Check "create_view accepts the schema form ({frames:[{sprite, delay}]})" {
         $loops = @(@{ frames = @(@{ sprite = $script:newSprite; delay = 4 }, @{ sprite = $script:newSprite; flipped = $true }) })
