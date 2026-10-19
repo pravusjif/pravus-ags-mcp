@@ -103,9 +103,12 @@ See audio.md for making the sounds. Clips live in `Game.agf`, so `save_project` 
 |---|---|
 | `build_game [rebuild] [mode]` | Saves the project, then a full build to `Compiled\Windows\<name>.exe`; structured messages like `compile`. A Debug-mode change forces a rebuild, as in the editor. `mode=release` turns the `agsmcp` plugin and Debug mode off and deletes the copied `agsmcp.dll` (use it for a build the user will ship); `mode=debug` turns both back on. The mode is saved with the project. |
 | `run_game [startRoom] [rebuild] [mode]` | Stops a running game (or a leftover one), saves the project, builds incrementally and launches windowed. `startRoom` skips the intro rooms, and also becomes the room `RestartGame` returns to. |
-| `stop_game` / `game_status` / `get_game_log [sinceLine] [limit]` | The engine log shows script errors with line numbers when the game crashes or quits unexpectedly. |
+| `stop_game` / `game_status` / `get_game_log [sinceLine] [limit] [source]` | The engine log shows script errors with line numbers when the game crashes or quits unexpectedly. `source=desktop` reads the `desktop_run` game's log; the default is the game launched last. |
 | `runtime_enable_plugin` | Once per project, then `save_project`; required for the `game_*` tools. |
 | `runtime_disable_plugin` | Unticks the plugin (then `save_project`). For a release build prefer `build_game mode=release`, which also removes the copied DLL. |
+| `desktop_run [exe] [startRoom] [renderer] [gameWidth] [gameHeight]` | Runs a game exe the way a player gets it, with no engine plugin (after `build_game mode=release`); `exe` defaults to the open game's build. Keep the default `software` renderer: Direct3D/OpenGL windows capture black. Its own log (`get_game_log source=desktop`). The `game_*` tools do not reach this game. |
+| `desktop_status` / `desktop_stop` | Running state and the window geometry (client area, game scale and offset); stop it. |
+| `desktop_screenshot [outPath] [frames] [intervalMs]` | The window at the game's native size (works while covered). `frames > 1` writes a timed burst to the `outPath` directory (`frame-NNN.png`, `frames.json`). |
 
 ### When the server is unreachable
 

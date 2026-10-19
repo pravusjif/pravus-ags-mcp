@@ -32,6 +32,8 @@ namespace AgsMcp.Editor.Tools
             yield return GetGameLog(ctx, runner);
         }
 
+        internal const string SourceEngine = "engine";
+        internal const string SourceDesktop = "desktop";
         internal const string ModeDebug = "debug";
         internal const string ModeRelease = "release";
 
@@ -286,24 +288,34 @@ namespace AgsMcp.Editor.Tools
             Title = "Get game log",
             Description = "Return lines from the running (or last) game's log file. 'sinceLine' is a 0-based line offset to " +
                           "start from (use the returned 'nextLine' to poll incrementally). 'limit' caps the lines returned " +
-                          "(default 500).",
+                          "(default 500). 'source' picks the game started by run_game ('engine') or by desktop_run ('desktop'); " +
+                          "by default the one launched last.",
             InputSchema = Schema.Object()
                 .Optional("sinceLine", Schema.Integer("0-based line to start from (default 0)."))
                 .Optional("limit", Schema.Integer("Maximum lines to return (default 500)."))
+                .Optional("source", Schema.String("Which game's log: 'engine' (run_game) or 'desktop' (desktop_run). Default: the last launched.", SourceEngine, SourceDesktop))
                 .Build(),
             Annotations = ToolAnnotations.ReadOnlyTool,
             RunOnUiThread = false,
             Handler = args =>
             {
-                string logPath = runner.LogPath;
+                string source = args.String("source", null);
+                if (source == null)
+                    source = (ctx.DesktopRunner.StartedUtc ?? DateTime.MinValue) > (runner.StartedUtc ?? DateTime.MinValue) ? SourceDesktop : SourceEngine;
+                if (source != SourceEngine && source != SourceDesktop)
+                    throw new ToolException("'source' must be 'engine' or 'desktop'.");
+                string logPath = (source == SourceDesktop ? ctx.DesktopRunner : runner).LogPath;
                 if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath))
-                    throw new ToolException("No game log yet. Launch the game with run_game first.");
+                    throw new ToolException(source == SourceDesktop
+                        ? "No desktop game log yet. Launch a game with desktop_run first."
+                        : "No game log yet. Launch the game with run_game first.");
                 int sinceLine = Math.Max(0, args.Int("sinceLine", 0));
                 int limit = Math.Max(1, args.Int("limit", 500));
                 string text = ReadShared(logPath);
                 LogSlice slice = SliceLog(text, sinceLine, limit);
                 return ToolResult.Json(new
                 {
+                    source,
                     logPath,
                     totalLines = slice.TotalLines,
                     fromLine = slice.FromLine,
@@ -443,6 +455,22 @@ namespace AgsMcp.Editor.Tools
 
         public string LogPath { get { lock (_lock) return _logPath; } }
 
+        /// <summary>When the last process was started (null if none), so get_game_log can pick the latest launch.</summary>
+        public DateTime? StartedUtc { get { lock (_lock) return _process == null ? (DateTime?)null : _startedUtc; } }
+
+        public string ExePath { get { lock (_lock) return _exePath; } }
+
+        /// <summary>The running process's main window, or IntPtr.Zero (none yet, exited, or never launched).</summary>
+        public IntPtr MainWindow()
+        {
+            lock (_lock)
+            {
+                if (_process == null || SafeHasExited(_process)) return IntPtr.Zero;
+                try { _process.Refresh(); return _process.MainWindowHandle; }
+                catch { return IntPtr.Zero; }
+            }
+        }
+
         public bool IsRunning
         {
             get { lock (_lock) return _process != null && !SafeHasExited(_process); } }
@@ -459,7 +487,11 @@ namespace AgsMcp.Editor.Tools
                     UseShellExecute = false,
                 };
                 if (env != null)
-                    foreach (var kv in env) psi.EnvironmentVariables[kv.Key] = kv.Value;
+                    foreach (var kv in env)
+                    {
+                        if (kv.Value == null) psi.EnvironmentVariables.Remove(kv.Key); // null removes an inherited variable
+                        else psi.EnvironmentVariables[kv.Key] = kv.Value;
+                    }
 
                 var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 process.Exited += (s, e) =>

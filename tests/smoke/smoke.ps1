@@ -80,6 +80,7 @@ try { $previousGame = (Get-Json (Invoke-Mcp "project_info")).projectFolder } cat
 
 function Remove-SmokeGame {
     try { Invoke-Mcp "stop_game" | Out-Null } catch { }
+    try { Invoke-Mcp "desktop_stop" | Out-Null } catch { }
     if (-not $previousGame) {
         Write-Host "No game was open before the run, so the smoke game stays open at $Folder. Delete it after closing it." -ForegroundColor Yellow
         return
@@ -618,6 +619,49 @@ try {
         $sw.Stop()
         Write-Host ("    exited after {0} ms" -f $sw.ElapsedMilliseconds) -ForegroundColor DarkGray
         $r.launched -and -not $s.running -and $sw.ElapsedMilliseconds -lt 3000
+    }
+
+    # ---- Desktop driver: a release build, no engine plugin ----
+    Write-Host "Desktop driver" -ForegroundColor Cyan
+    Check "build_game mode=release, then desktop_run starts it in room 1 with a window" {
+        $b = Get-Json (Invoke-Mcp "build_game" @{ mode = "release" } 300)
+        $script:desk = Get-Json (Invoke-Mcp "desktop_run" @{ exe = $b.exe; startRoom = 1 } 90)
+        Write-Host ("    window after {0} ms, client {1}x{2}, scale {3}" -f $desk.windowMs, $desk.window.client.width, $desk.window.client.height, $desk.window.scale) -ForegroundColor DarkGray
+        $b.ok -and $desk.launched -and $desk.window.hwnd -ne 0 -and $desk.renderer -eq "software"
+    }
+    Start-Sleep -Seconds 3
+    Check "desktop_status reports the game running" {
+        $s = Get-Json (Invoke-Mcp "desktop_status")
+        $s.running -eq $true -and $s.window.client.width -ge $s.gameWidth
+    }
+    Check "desktop_screenshot writes a PNG at the game's native size" {
+        $shot = Join-Path $Folder "out\desktop.png"
+        $j = Get-Json (Invoke-Mcp "desktop_screenshot" @{ outPath = $shot })
+        Add-Type -AssemblyName System.Drawing
+        $img = [System.Drawing.Image]::FromFile($shot); $w = $img.Width; $h = $img.Height
+        # Not all one colour: the capture read the game, not a blank surface.
+        $bmp = New-Object System.Drawing.Bitmap $img; $img.Dispose()
+        $colours = @{}; for ($y = 5; $y -lt $h; $y += 20) { for ($x = 5; $x -lt $w; $x += 20) { $colours[$bmp.GetPixel($x, $y).ToArgb()] = 1 } }; $bmp.Dispose()
+        Write-Host ("    {0}x{1} via {2}, {3} distinct sampled colours" -f $w, $h, ($j.note -replace '.*\((\w+)\).*', '$1'), $colours.Count) -ForegroundColor DarkGray
+        $w -eq $desk.gameWidth -and $h -eq $desk.gameHeight -and $colours.Count -gt 1
+    }
+    Check "desktop_screenshot burst of 3 every 200 ms writes frames on schedule" {
+        $dir = Join-Path $Folder "out\desktop-burst"
+        $j = Get-Json (Invoke-Mcp "desktop_screenshot" @{ outPath = $dir; frames = 3; intervalMs = 200 })
+        $ms = @($j.frames | ForEach-Object { $_.ms })
+        Write-Host ("    frames at {0} ms" -f ($ms -join ",")) -ForegroundColor DarkGray
+        $j.count -eq 3 -and @(Get-ChildItem $dir -Filter "frame-*.png").Count -eq 3 -and (Test-Path (Join-Path $dir "frames.json")) -and
+            $ms[1] -ge 200 -and $ms[2] -ge 400 -and $ms[2] -lt 1000
+    }
+    Check "get_game_log source=desktop reads the desktop game's log, and it is the default now" {
+        $d = Get-Json (Invoke-Mcp "get_game_log" @{ source = "desktop"; limit = 5000 })
+        $def = Get-Json (Invoke-Mcp "get_game_log" @{ limit = 1 })
+        $d.source -eq "desktop" -and $def.source -eq "desktop" -and $d.logPath -match "ags-mcp-desktop" -and $d.totalLines -gt 0 -and
+            -not ($d.lines -match "MCP engine bridge")
+    }
+    Check "desktop_stop stops it" {
+        $s = Get-Json (Invoke-Mcp "desktop_stop")
+        $s.stopped -eq $true -and (Get-Json (Invoke-Mcp "desktop_status")).running -eq $false
     }
 }
 finally {

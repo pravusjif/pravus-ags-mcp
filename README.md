@@ -256,7 +256,7 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | `run_game([startRoom], [rebuild], [mode])` | Build as `build_game` does (saving first) and launch the game windowed, logging to a file; stops any prior game, or a leftover one running the built exe, before building. |
 | `stop_game` | Stop the running game. |
 | `game_status` | Running/exited, pid, exit code, uptime, log path. |
-| `get_game_log([sinceLine], [limit])` | Tail the engine log with a `nextLine` cursor (the next line the engine writes). |
+| `get_game_log([sinceLine], [limit], [source])` | Tail the engine log with a `nextLine` cursor (the next line the engine writes); `source` is `engine` (`run_game`) or `desktop` (`desktop_run`), by default the last launched. |
 
 ### Player simulation (needs `agsmcp.dll`)
 | Tool | Description |
@@ -275,6 +275,18 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | `game_call_function(name, [args], [roomScript])` | Queue a function defined in GlobalScript.asc, or with `roomScript=true` in the current room's `roomN.asc` (0–2 integer args; refused if that script does not define it). Keep it non-blocking. |
 | `game_text_extent(font, text)` | Width and height of one line as the running game draws it (engine `GetTextExtent`; TTF fonts too). |
 | `game_run_interaction(target, mode, [inventory])` | Click a hotspot, object or character of the current room (`hotspot:N`, `object:oName`, `character:cName`…) in a cursor mode: the point comes from the mask or sprite, is confirmed with the hover name, then a click is queued. Refuses rather than mis-clicking. |
+
+### Desktop driver (any build, no plugin)
+Test the game a player gets: a release build (`build_game mode=release`) with no engine plugin, observed through its window. The software renderer is the default because Direct3D and OpenGL windows read back black.
+
+| Tool | Description |
+|------|-------------|
+| `desktop_run([exe], [startRoom], [renderer], [gameWidth], [gameHeight])` | Launch a game exe windowed (default: the open game's built exe) with its own log, and wait for its window. |
+| `desktop_status` | Running, pid, log, and the window's client area with the game's scale and offset in it. |
+| `desktop_stop` | Stop it. |
+| `desktop_screenshot([outPath], [frames], [intervalMs])` | Capture the window at the game's native size as a PNG; `frames > 1` writes a timed burst (`frame-NNN.png` + `frames.json`) into the `outPath` directory. |
+
+`get_game_log(source=desktop)` reads this game's log; without `source` it reads whichever game was launched last.
 
 ## Testing
 
