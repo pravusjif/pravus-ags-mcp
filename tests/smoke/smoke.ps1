@@ -256,6 +256,32 @@ try {
         $s = (Get-Json (Invoke-Mcp "get_dialog_script" @{ id = $script:smokeDialog })).script
         ($s -match "narrator: Hi\r\n") -and -not ($s -match "[^\r]\n")
     }
+    Check "list_strings lists the smoke dialog's options and its speech line" {
+        $o = Get-Json (Invoke-Mcp "list_strings" @{ type = "DialogOption"; limit = 1000 })
+        $mine = @($o.strings | Where-Object { $_.source -like "dialog $($script:smokeDialog) option *" })
+        $d = Get-Json (Invoke-Mcp "list_strings" @{ type = "DialogScript"; contains = "Hi" })
+        $line = $d.strings | Where-Object { $_.source -eq "dialog $($script:smokeDialog)" -and $_.text -eq "Hi" }
+        $mine.Count -eq 2 -and ($mine.text -contains "Hello") -and ($mine.text -contains "Bye") -and
+            -not ($o.strings | Where-Object { $_.type -ne "DialogOption" }) -and $line.speaker -eq "narrator" -and $line.line -eq 4
+    }
+    Check "list_strings rooms=true adds room text and reopens the loaded room" {
+        $all = Get-Json (Invoke-Mcp "list_strings" @{ rooms = $true; limit = 1 })
+        $page = Get-Json (Invoke-Mcp "list_strings" @{ limit = 2; offset = 1 })
+        $all.total -gt 0 -and $all.count -eq 1 -and $all.truncated -and $page.offset -eq 1 -and $page.count -eq 2
+    }
+
+    # ---- Text measurement ----
+    Write-Host "Text" -ForegroundColor Cyan
+    Check "measure_text measures and wraps a line in font 0" {
+        $one = Get-Json (Invoke-Mcp "measure_text" @{ font = "0"; text = "Hello" })
+        $two = Get-Json (Invoke-Mcp "measure_text" @{ font = "0"; text = "Hello[Hello" })
+        $hh = Get-Json (Invoke-Mcp "measure_text" @{ font = "0"; text = "Hello Hello" })
+        # The engine wraps at maxWidth - 1, so maxWidth = width + 1 is the tightest fit for "Hello Hello".
+        $wrap = Get-Json (Invoke-Mcp "measure_text" @{ font = "0"; text = "Hello Hello Hello"; maxWidth = $hh.width + 1 })
+        $one.width -gt 0 -and $one.lineCount -eq 1 -and $one.fontHeight -gt 0 -and
+            $two.lineCount -eq 2 -and $two.lines[1].width -eq $one.width -and $two.height -eq $one.lineSpacing + $one.height -and
+            $wrap.lineCount -eq 2 -and $wrap.lines[0].text -eq "Hello Hello" -and $wrap.lines[1].text -eq "Hello" -and $wrap.width -eq $hh.width
+    }
 
     # ---- GUI controls ----
     Write-Host "GUI controls" -ForegroundColor Cyan

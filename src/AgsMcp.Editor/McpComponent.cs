@@ -51,6 +51,7 @@ namespace AgsMcp.Editor
             _mcp.AddTools(RoomTools.Create(context));
             _mcp.AddTools(AssetTools.Create(context));
             _mcp.AddTools(FontTools.Create(context));
+            _mcp.AddTools(TextTools.Create(context));
             _mcp.AddTools(AudioTools.Create(context));
             _mcp.AddTools(BuildRunTools.Create(context));
             _mcp.AddTools(GameTools.Create(context));

@@ -451,7 +451,7 @@ namespace AgsMcp.Editor.Tools
         }
 
         /// <summary>A room script's current text, without loading it into the project if it is not already.</summary>
-        private static string RoomScriptText(Game game, UnloadedRoom room) =>
+        internal static string RoomScriptText(Game game, UnloadedRoom room) =>
             room.Script != null ? room.Script.Text : File.ReadAllText(Path.Combine(game.DirectoryPath, room.ScriptFileName));
 
         private static Script Resolve(Game game, string name, bool wantHeader)

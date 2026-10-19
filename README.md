@@ -234,6 +234,8 @@ the room script.
 | `delete_sprite(number)` | Delete a sprite (refuses with a usage report if still referenced). |
 | `create_view([name], loops)` | Create a view; `loops` is an array of `{frames, runNextLoop?}` and each frame is `{sprite, delay?, flipped?, sound?}` (`sound` is an audio clip's index). |
 | `import_font(id, path, [height], [pointSize])` | Import a TTF or WFN file over a font slot (`agsfnt<id>.ttf\|.wfn`); a TTF takes a pixel `height` or a `pointSize`. New slots come from `create_entity font`. |
+| `measure_text(font, text, [maxWidth])` | Measure and wrap text in a WFN font as the engine does (`[` breaks, wrap at `maxWidth`); widths, line heights and the wrapped lines. TTF fonts are refused. |
+| `list_strings([type], [contains], [rooms], [limit], [offset])` | The game's player-visible text, as the translation source collects it (dialog options and speech, script string literals, GUI texts, descriptions, messages); `rooms=true` adds room messages and descriptions. |
 
 ### Audio
 | Tool | Description |
