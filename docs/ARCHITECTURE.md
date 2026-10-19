@@ -210,10 +210,14 @@ src/AgsMcp.Editor/
 - Audio clips and folders cannot be moved between folders.
 - 8-bit backgrounds cannot be imported into 256-colour games.
 - No automatic backup of `Game.agf` before the first write of a session.
-- Game-data, sprite and new-module changes do not refresh the editor's project tree or open panes until the next reload. The audio tools and the audio entity kinds are the exception.
+- Game-data, sprite and new-module changes do not refresh the editor's project tree or open panes until the next reload. The audio tools and the audio entity kinds are the exception. GUI control tools fire `NotifyClientsGUIControlAddedOrRemoved`, `reload_script`/`write_script` notify the script pane, and font tools push to the native font slots, but whether an open GUI editor, Sprite Manager or script tab redraws was not checked.
 - `open_project` cannot reopen the game that is already open (`_OpenInEditor.lock`); reloading from disk means restarting the editor.
-- No tool reloads the project from disk. `move_script_module` refuses projects with script folders.
+- No tool reloads the whole project from disk (`reload_script` reloads one script). `move_script_module` refuses projects with script folders.
 - The editor-debugger named pipes (`--enabledebugger <token>`) are not hosted, so runtime errors come only from the engine log, without call stacks.
+- `measure_text` refuses TTF fonts (`game_text_extent` measures them in the running game). It was checked against the engine for plain WFN text only: outlines, `SizeMultiplier` > 1 and extended characters in a non-Unicode game are untested.
+- `game_run_interaction` ignores character scaling when it computes a character's sprite box, and refuses rather than clicks when every sampled point is covered.
+- A `game_screenshot` burst holds the editor's one engine connection until it ends, so no other `game_*` call runs meanwhile; it overwrites `frame-NNN.png` and leaves older frames in the directory.
+- Desktop driver: only the software renderer is verified (Direct3D/OpenGL are expected to capture black, and the `CopyFromScreen` fallback is unexercised). Input needs an unlocked, interactive desktop and takes the foreground; there is no state readout or hover check for a desktop game, only screenshots and its log.
 
 ## Testing
 

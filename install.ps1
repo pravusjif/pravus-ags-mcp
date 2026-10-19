@@ -126,13 +126,17 @@ function Write-NextSteps {
     Write-Host ""
     Write-Host "Next steps" -ForegroundColor Cyan
     Write-Host "  1. Start the AGS editor and open your game. An MCP menu appears and the server listens on $e."
+    Write-Host "     Check it from PowerShell: (Invoke-WebRequest $($e -replace 'mcp$', '') -UseBasicParsing).Content"
+    Write-Host "     prints 'AGS MCP server <N> tools' and the open game."
     Write-Host "  2. Connect your MCP client (MCP > Client setup in the editor shows the same):"
     Write-Host "       Any Streamable HTTP client:  $e"
     Write-Host "       Claude Code:                 claude mcp add --transport http ags $e"
     Write-Host "       Codex CLI (config.toml):     [mcp_servers.ags]  url = `"$e`""
     Write-Host "       Gemini CLI (settings.json):  { `"mcpServers`": { `"ags`": { `"httpUrl`": `"$e`" } } }"
     Write-Host "       stdio-only clients:          command 'npx', args '-y mcp-remote $e'"
-    Write-Host "  3. For the game_* tools, call runtime_enable_plugin and then save_project once per game."
+    Write-Host "  3. For the game_* tools, call runtime_enable_plugin (or build_game mode=debug) and then save_project once per game."
+    Write-Host "  4. Before shipping, build_game mode=release takes the engine plugin out and turns Debug off;"
+    Write-Host "     the desktop_* tools then play that build with real mouse and keyboard input."
 }
 
 function Invoke-AgsMcpInstall {

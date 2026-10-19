@@ -14,7 +14,6 @@ The engine plugin has to be enabled in the project. `project_info` lists `agsmcp
 ## The loop
 
 ```
-save_project                                   # run_game builds from disk
 run_game startRoom=N                           # returns at once with the pid
 game_wait_until ready timeoutMs=20000 stableMs=3000   # game booted, intro lines done
 <for each step of the interaction you changed>

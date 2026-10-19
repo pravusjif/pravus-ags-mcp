@@ -16,7 +16,7 @@ A key a tool does not take is refused with the list of the ones it does.
 | Tool | Notes |
 |---|---|
 | `project_info` | Always first. Returns `resolution`, `colorDepth`, `playerCharacter`, counts, the enabled `plugins`, `debugMode` and `enginePlugin{available, enabled}` (whether the `game_*` tools can work). |
-| `save_project` | Writes `Game.agf`, `acsprset.spr` (sprites), scripts and the loaded room. Cheap; call it after any entity/sprite/view change and before `run_game`. |
+| `save_project` | Writes `Game.agf`, `acsprset.spr` (sprites), scripts and the loaded room. Cheap; call it after any entity/sprite/view change (`build_game` and `run_game` also save first). |
 | `list_entities type` | `character`, `inventory`, `dialog`, `gui`, `guicontrol`, `view`, `cursor`, `font`, `audioclip`, `audiocliptype`, `audiofolder`, `globalvariable`, `customproperty`. Returns `{id, name}`; `id` strings. |
 | `find_usages name` | Whole-word search across modules, room scripts and dialog scripts. Use before renames/deletes. |
 | `batch calls [stopOnError]` | `calls` is `[{name, arguments}]`, run in order in one request: use it for bulk passes (many `set_properties`, `import_sprite` per frame) instead of one call each. Returns `{results:[{name, ok, content|error}], stopped}`; JSON text comes back parsed, images as a note (use `outPath`). Stops at the first failure unless `stopOnError=false`; no nesting. |

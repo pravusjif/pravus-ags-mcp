@@ -22,7 +22,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 - [x] 12. Desktop driver, part 1: `desktop_run/status/stop/screenshot`, `get_game_log source` — `Tools/DesktopTools.cs`, pure `Engine/DesktopGeometry.cs`, `ctx.DesktopRunner`; "Desktop driver, part 1: desktop_run/status/stop/screenshot".
 - [x] 13. Desktop driver, part 2: `desktop_click/key/type` — `Tools/DesktopTools.Input.cs` (SendInput after a guarded focus), pure `Engine/VirtualKeys.cs`, `game_wait_until logLine source`, non-inheritable server sockets; "Desktop driver, part 2: desktop_click/key/type".
 - [x] 14. Skill update: tools.md, playtesting.md, scripting.md, SKILL.md, evals — release-build `desktop_*` loop, budget/`batch` and eight new caveats in playtesting.md, line endings/stale copy/colour numbers in scripting.md, SKILL.md pointers and subagent-edits line, evals 5–7; "Skill update: release builds, caveats, colour numbers, evals 5-7".
-- [ ] 15. Release 0.2.0: docs sweep, Known-gaps reconciliation, version bump
+- [x] 15. Release 0.2.0: docs sweep, Known-gaps reconciliation, version bump — version 0.2.0, `dist/ags-mcp-0.2.0.zip`, Known gaps reconciled, README count (79) and overview, install Next steps, skill save-first text; "Release 0.2.0: version bump, Known gaps, docs sweep". Tagging and publishing are the owner's (README Releasing).
 
 ## Rules for every milestone
 
@@ -73,6 +73,8 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 
 34. (2026-10-19) Skill update: every tool already had its `tools.md` row (each milestone added its own), so 14 added none. Budget and `batch` went into a new playtesting section, not the caveats list, since neither looks like a bug. The release-build check runs in the same play-test subagent as the `game_*` loop, and the skill tells the agent to warn the user about focus first. `scripting.md` already had define-before-use; the stale-copy line there gives the symptom and points to `reload_script`, while SKILL.md keeps the rule. A claim that colour numbers below 32 are palette slots was left out: not found in the 3.6 source.
 
+35. (2026-10-19) Release: the README records the count as "79 tools (`tools/list` in 0.2.0)" in the Tools intro. The skill's "save_project before run_game" lines now say `build_game`/`run_game` save first (decision 9), and evals 3 and 6 accept that save. The `v0.2.0` tag is not pushed: the chain never pushes, and the tag publishes a GitHub release.
+
 ## Verified facts (AGS 3.6.2.21 source and this repo)
 
 - **Plugins** (`Editor/AGS.Editor/Components/PluginsComponent.cs`): private `List<NativePlugin> _plugins`; `BeforeSaveGame` rebuilds `Game.Plugins` from the enabled entries; `RefreshDataFromGame` re-enables from `Game.Plugins`; private `RepopulateTreeView()` redraws the tree icons. `NativePlugin.Enabled=false` calls the DLL's `AGS_EditorShutdown`. `BuildTargetWindows.CopyPlugins` copies enabled DLLs into `Compiled\Windows` and never deletes, so a stale `agsmcp.dll` must be removed by us. `EditorInternals.EnableEnginePlugin` (reflection over `_plugins`) is the template for the disable path.
@@ -92,9 +94,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 
 ## Milestones
 
-### 15. Release 0.2.0
-Scope: reconcile ARCHITECTURE Known gaps with 2–13; README tools tables complete; `Directory.Build.props` `<Version>0.2.0</Version>`; `install.ps1` Next steps; `build.ps1 -Test -Engine -Package` produces `dist/ags-mcp-0.2.0.zip`.
-Gate: the full `smoke.ps1` passes (pass/fail counts quoted); the zip exists; the tool count from `tools/list` is recorded in the README.
+All fifteen have landed; their write-ups are in `docs/PLAN.progress.md`.
 
 ## Risks
 

@@ -2,8 +2,8 @@
 
 An [MCP](https://modelcontextprotocol.io) server that runs **inside the Adventure Game Studio 3.6 editor**
 as a plugin. It lets any MCP client (Claude Code, Codex, Gemini CLI, …) work with the project you have open in the editor:
-read and write scripts, edit game data, rooms and assets, build and run the game, and **drive the running
-game** the way a player would.
+read and write scripts, edit game data, rooms, GUIs, fonts and assets, build and run the game, **drive the running
+game** the way a player would, and play a release build with real mouse and keyboard input.
 
 It ships as two DLLs that you copy into the AGS folder — nothing else to install:
 
@@ -13,8 +13,9 @@ It ships as two DLLs that you copy into the AGS folder — nothing else to insta
 
 ## Status
 
-The server covers project creation, scripts, game data, room authoring (backgrounds, masks, objects, events),
-assets, build/run and player simulation. The architecture, design decisions, known gaps and verified AGS facts are
+The server covers project creation, scripts, game data, GUI controls, fonts and text measurement, room authoring
+(backgrounds, masks, objects, events), assets, debug and release builds, player simulation, and a desktop driver
+for release builds. The architecture, design decisions, known gaps and verified AGS facts are
 in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Platform support
@@ -111,13 +112,15 @@ To use the `game_*` tools you must, once per project: deploy `agsmcp.dll` (above
 then `save_project`. `run_game` then builds the game with the plugin baked in and launches it; the `game_*` tools
 talk to it over a private loopback port. For a release build call `build_game` with `mode=release`: it disables the
 plugin, turns Debug mode off and deletes `agsmcp.dll` from `Compiled\Windows`. `mode=debug` turns both back on, and
-`runtime_disable_plugin` only unticks the plugin.
+`runtime_disable_plugin` only unticks the plugin. The `desktop_*` tools then test the release build without the
+plugin, through its window.
 
 ### Agent skill
 
 `skills/ags-mcp/` teaches a coding agent to work on the game you have open through these tools: the persistence
 rules, recipes for rooms, objects, characters, dialogs and scripts, the pitfalls worth knowing, AGS 3.6 scripting
-patterns, checking changes in the running game with the `game_*` tools, and a small PIL helper for pixel art. It is
+patterns, checking changes in the running game with the `game_*` tools and a release build with the `desktop_*`
+tools, and helpers for pixel art and sound. It is
 a standard `SKILL.md` folder (instructions plus `references/` and `scripts/`), so:
 
 - **Agents that load `SKILL.md` skills** (Claude Code, and others that support the format): put the folder in the
@@ -161,7 +164,7 @@ README and LICENSE). Running the workflow by hand produces the zip as a build ar
 
 ## Tools
 
-All tools carry `readOnlyHint`/`destructiveHint` annotations. Changes to the project model are in memory until you
+The server has 79 tools (`tools/list` in 0.2.0). All tools carry `readOnlyHint`/`destructiveHint` annotations. Changes to the project model are in memory until you
 call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts either the numeric ID or the script name.
 The names in the signatures below are the argument keys, and `[x]` marks an optional one. An argument a tool does not
 take is refused, with the list of the ones it does.

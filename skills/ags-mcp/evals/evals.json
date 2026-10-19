@@ -44,7 +44,7 @@
         "A cat character exists with NormalView set to that view, StartingRoom set to the player's starting room and StartX/StartY on its walkable floor",
         "The cat has Look and Talk events bound to functions in GlobalScript.asc; the Talk handler starts the cat dialog",
         "A dialog exists with exactly two options and a dialog script where one option ends with stop",
-        "compile reports 0 errors and save_project was called before run_game",
+        "compile reports 0 errors and the project was saved before the game ran (save_project, or run_game/build_game, which save first)",
         "The game was run in the user's project, the agent clicked the cat in Talk mode, and gathered evidence that the dialog started (a screenshot showing the options, or game_state showing the interface disabled / dialog active)",
         "The view's script name does not clash with the character's derived macro (the view is not named like the character without its c prefix)"
       ]
@@ -89,7 +89,7 @@
         "A new button exists on that GUI (list_gui_controls), with a script name, a 'Hint' text or image, and a position inside the GUI that does not overlap another control",
         "The button's Click event is bound with set_event (type guicontrol) and the GlobalScript handler makes the player say a line",
         "Game.agf was not edited by hand",
-        "compile reports 0 errors and save_project was called before run_game",
+        "compile reports 0 errors and the project was saved before the game ran (save_project, or run_game/build_game, which save first)",
         "The game was run in the user's project, the agent made the GUI visible if it pops up only on demand, clicked the button with game_click, and gathered evidence of the line (a screenshot taken straight after the click, or a logged marker)"
       ]
     },
