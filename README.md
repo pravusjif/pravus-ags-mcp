@@ -25,6 +25,27 @@ macOS or Linux, only engine builds. The editor plugin runs inside the editor, an
 x86 DLL loaded by the Windows build of your game, so neither runs natively on macOS. Your MCP client can run
 anywhere that can reach `127.0.0.1:7471` on the machine running the editor; in practice, that same Windows machine.
 
+## Security
+
+- **Local only.** The MCP server listens on the loopback address (`127.0.0.1` and `::1`), port 7471 by default, and cannot be
+  reached from other machines. The engine plugin listens on loopback port 7470, and only in a game the editor plugin
+  launched.
+- **No authentication.** Any program running on the same machine can call the server while the editor is open.
+  Requests from a web page are refused: a request with a non-local `Origin` header gets 403, which blocks DNS
+  rebinding.
+- **The tools act with your permissions.** They can change and save your project, write files (`outPath`, imports,
+  builds), build and launch games, run your game's script functions, and send real mouse and keyboard input to a game
+  window (`desktop_click`, `desktop_key`, `desktop_type`). Give an agent the same trust you would give a person sitting
+  at your editor, and use your client's tool-approval settings to choose what it may run unasked. Every tool is marked
+  `readOnlyHint` or `destructiveHint`, which clients can use for this.
+- **Turning it off.** **MCP > Stop MCP server** stops the server until the editor restarts. To stop it starting with the editor,
+  set `"AutoStart": false` in `%APPDATA%\AGS-MCP\settings.json`.
+- **Shipped games.** The engine plugin does nothing unless the editor plugin launched the game, and a release build
+  (`build_game mode=release`) removes `agsmcp.dll` from the build.
+
+Report security issues privately through this repo's
+[security advisories](https://github.com/pravusjif/pravus-ags-mcp/security/advisories/new).
+
 ## Install
 
 You need AGS 3.6.x. The portable zip from the [AGS releases page](https://github.com/adventuregamestudio/ags/releases)
@@ -320,6 +341,7 @@ install.ps1                  installer (downloads a release, or installs from on
 AGENTS.md                    instructions for coding agents working on this repo (CLAUDE.md imports it)
 build.ps1                    build, test, deploy and package
 Local.props.example          template for the git-ignored Local.props (machine-specific paths)
+glama.json                   claims this server's listing on glama.ai
 ```
 
 ## License
