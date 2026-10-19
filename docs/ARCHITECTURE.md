@@ -108,8 +108,8 @@ src/AgsMcp.Editor/
 
 ### Persistence model
 - **`Game.agf`-level changes** (game data, sprites, views, plugins, settings, new script modules' registration) are made to the editor's in-memory model and written by `save_project`. `AGSEditor.SaveGameFiles()` writes both `Game.agf` and `acsprset.spr`.
-- **Script text** is written to disk at once (`Script.SaveToDisk()`), in CRLF, the editor's convention.
-- **The editor's copy of a script wins over the disk.** Module text lives in `Script.Text`, which `read_script`, `edit_script`, `compile` and `save_project` all use, so a module edited on disk by another program is neither read nor compiled, and the next save writes the old text back. A room script is read from disk once (`UnloadedRoom.Script`) and then reused while the editor holds it. Agents must change scripts through the script tools.
+- **Script text** is written to disk at once (`Script.SaveToDisk()`), in CRLF, the editor's convention. Every script write (`write_script`, `edit_script`, `set_event`) goes through `ScriptTools.Save`; `set_room_event` keeps its own path because it saves the room too. `set_dialog_script` stores CRLF as well: the editor's dialog pane finds an option's section by `Environment.NewLine + "@N"` and appends a duplicate when the script uses LF (`Editor/AGS.Editor/Panes/DialogEditor.cs`). `Game.agf` holds dialog scripts in CDATA, which reads back as LF on load.
+- **The editor's copy of a script wins over the disk.** Module text lives in `Script.Text`, which `read_script`, `edit_script`, `compile` and `save_project` all use, so a module edited on disk by another program is neither read nor compiled, and the next save writes the old text back. A room script is read from disk once (`UnloadedRoom.Script`) and then reused while the editor holds it. Agents should change scripts through the script tools. A stale copy is detectable and reloadable: `read_script` (`staleOnDisk`) and `compile` (`staleOnDisk`, a list of the compiled bodies and module headers) compare the file, read with `Script.TextEncoding`, against `Script.Text` ignoring newline style and trailing newlines (`ScriptText.SameIgnoringNewlines`). `reload_script` calls `Script.LoadFromDisk()` on a module's header and body, or on the room script in place: the loaded `Room` and its `UnloadedRoom` share one `Script` object, which `UnloadScript()` + `LoadScript()` would split. It refuses a loaded room with unsaved changes.
 - **Room edits** are saved at once through the editor's own room save path (see [Rooms](#rooms)).
 - Unsaved model changes are lost when the editor restarts.
 
@@ -188,7 +188,6 @@ src/AgsMcp.Editor/
 - `open_project` cannot reopen the game that is already open (`_OpenInEditor.lock`); reloading from disk means restarting the editor.
 - No tool reorders script modules, creates sprite folders, unticks an engine plugin, or reloads the project from disk.
 - `game_key` sends arrows, Home, End, PageUp/Down, Insert and Delete through `SimulateKeyPress`, which pushes them as **numpad** scancodes (`Engine/platform/base/sys_events.cpp`); with NumLock on in the new key-handling mode they can arrive as digits. One project reported Down and F7 arriving as Alt plus a letter, which the code does not explain; not yet reproduced.
-- `set_dialog_script` stores the script as sent (often LF), while the script tools write CRLF, so a dialog edit can show as a whole-text diff.
 - The editor-debugger named pipes (`--enabledebugger <token>`) are not hosted, so runtime errors come only from the engine log, without call stacks.
 
 ## Testing

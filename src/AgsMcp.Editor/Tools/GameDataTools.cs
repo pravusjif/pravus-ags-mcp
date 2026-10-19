@@ -216,7 +216,9 @@ namespace AgsMcp.Editor.Tools
                     dialog.Options.Clear();
                     dialog.Options.AddRange(options);
                 }
-                if (args.Has("script")) dialog.Script = args.String("script");
+                // CRLF, as the editor writes it: its dialog pane finds an option's section by Environment.NewLine + "@N"
+                // and appends a duplicate when the script uses LF.
+                if (args.Has("script")) dialog.Script = ScriptText.NormalizeNewlines(args.String("script"), "\r\n");
                 return ToolResult.Json(new { id = dialog.ID.ToString(), name = dialog.Name, options = dialog.Options.Count, updated = true });
             },
         };
@@ -317,14 +319,7 @@ namespace AgsMcp.Editor.Tools
                 interactions.SetScriptFunctionNameForInteractionSuffix(suffix, funcName);
                 string newText = EditorInternals.InsertFunction(script.Text, funcName, paramList);
                 bool stubAdded = newText != script.Text;
-                if (stubAdded)
-                {
-                    script.Text = newText;
-                    script.Modified = true;
-                    script.SaveToDisk();
-                    ctx.Editor.RebuildAutocompleteCache(script);
-                    EditorInternals.NotifyScriptChanged(script);
-                }
+                if (stubAdded) ScriptTools.Save(ctx, script, newText);
                 return ToolResult.Json(new
                 {
                     type = kind.Name,

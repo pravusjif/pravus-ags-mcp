@@ -20,7 +20,7 @@ The `ags` MCP server lives inside the running AGS 3.6 editor and edits **the pro
 3. Keep the two persistence tiers in mind, because forgetting one loses work:
    - **Written immediately:** every room tool (`set_room_background`, `draw_room_mask`, `set_room_properties`, `create_room_object`, `set_room_event`, …) saves its `.crm`; `write_script` / `edit_script` / `create_script_module` save the script file.
    - **Needs `save_project`:** everything in `Game.agf`: sprites, views, audio clips, characters, inventory items, dialogs, global variables, entity properties, `runtime_enable_plugin`. Call `save_project` at the end of any batch that touched these, and before `run_game` (which builds from disk).
-   - **Change scripts only through the script tools** (`write_script`, `edit_script`). The editor keeps its own copy of every module, and of a room script once it has loaded it, and compiles and saves that copy: a script edited on disk with another tool is not compiled, and the next save writes the old text back over it.
+   - **Change scripts only through the script tools** (`write_script`, `edit_script`). The editor keeps its own copy of every module, and of a room script once it has loaded it, and compiles and saves that copy: a script edited on disk with another tool is not compiled, and the next save writes the old text back over it. When `read_script` or `compile` reports `staleOnDisk`, that happened: `reload_script` takes the disk version.
    - A room tool returns `save.saved=false` with compiler messages when the room's script does not compile. The edit is still in the editor; fix the script, then run any room tool or `save_project` to write it.
 
 ## The general loop

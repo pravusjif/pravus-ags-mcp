@@ -99,6 +99,14 @@ namespace AgsMcp.Editor.Tools
         }
 
         /// <summary>
+        /// True when the two texts differ at most in newline style and in newlines at the very end, the only
+        /// differences a save round-trip introduces. Used to tell whether a script on disk was edited outside
+        /// the editor's in-memory copy.
+        /// </summary>
+        public static bool SameIgnoringNewlines(string a, string b) =>
+            string.Equals(NormalizeNewlines(a, "\n").TrimEnd('\n'), NormalizeNewlines(b, "\n").TrimEnd('\n'), StringComparison.Ordinal);
+
+        /// <summary>
         /// True when the script defines a plain function of that name at the start of a line
         /// (<c>function name(</c>, <c>int name(</c>, <c>static void name(</c>, ...). Import lines, calls and
         /// struct member functions (<c>Type::name</c>) do not count.

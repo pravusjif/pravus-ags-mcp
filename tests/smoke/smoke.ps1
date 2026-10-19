@@ -145,7 +145,20 @@ try {
     Check "compile is clean after the fix" {
         Invoke-Mcp "write_script" @{ name = "McpSmoke"; text = "// fixed`r`nint ok_value = 1;" } | Out-Null
         $r = Get-Json (Invoke-Mcp "compile")
-        $r.ok -eq $true
+        $r.ok -eq $true -and $r.staleOnDisk.Count -eq 0
+    }
+    Check "a disk edit shows as staleOnDisk in read_script and compile" {
+        Set-Content (Join-Path $Folder "McpSmoke.asc") "// edited on disk`r`nint ok_value = 2;"
+        $r = Get-Json (Invoke-Mcp "read_script" @{ name = "McpSmoke" })
+        $c = Get-Json (Invoke-Mcp "compile" @{ name = "McpSmoke" })
+        $r.staleOnDisk -eq $true -and $r.text -match "fixed" -and ($c.staleOnDisk -contains "McpSmoke.asc")
+    }
+    Check "reload_script takes the disk version and clears staleOnDisk" {
+        $l = Get-Json (Invoke-Mcp "reload_script" @{ name = "McpSmoke" })
+        $r = Get-Json (Invoke-Mcp "read_script" @{ name = "McpSmoke" })
+        $disk = (Get-Content (Join-Path $Folder "McpSmoke.asc")) -join "`n"
+        ($l.files | Where-Object { $_.file -eq "McpSmoke.asc" }).changed -eq $true -and
+            $r.staleOnDisk -eq $false -and $r.text -eq $disk
     }
 
     # ---- Rooms ----
@@ -198,6 +211,13 @@ try {
         $c = Get-Json (Invoke-Mcp "compile" @{ name = "room2" })
         ($t -match "hSmoke_Look") -and $c.ok
     }
+    Check "reload_script reloads a room script edited on disk" {
+        Add-Content (Join-Path $Folder "room2.asc") "// reloaded from disk"
+        $before = (Get-Json (Invoke-Mcp "read_script" @{ name = "room2" })).staleOnDisk
+        Invoke-Mcp "reload_script" @{ name = "room2" } | Out-Null
+        $r = Get-Json (Invoke-Mcp "read_script" @{ name = "room2" })
+        $before -eq $true -and $r.staleOnDisk -eq $false -and $r.text -match "reloaded from disk"
+    }
     Check "render_room(2) with a mask overlay names the areas" {
         $r = Invoke-Mcp "render_room" @{ number = 2; mask = "walkableareas" }
         (Has-Image $r) -and ((Get-Text $r) -match "1=")
@@ -209,7 +229,13 @@ try {
         $d = Get-Json (Invoke-Mcp "create_entity" @{ type = "dialog" })
         Invoke-Mcp "set_dialog_script" @{ id = $d.name; options = @(@{ text = "Hello" }, @{ text = "Bye"; show = $false }) } | Out-Null
         $g = Get-Json (Invoke-Mcp "get_dialog_script" @{ id = $d.name })
+        $script:smokeDialog = $d.name
         $g.options.Count -eq 2 -and $g.options[1].show -eq $false
+    }
+    Check "set_dialog_script stores an LF script with CRLF" {
+        Invoke-Mcp "set_dialog_script" @{ id = $script:smokeDialog; script = "@S`nreturn`n@1`nnarrator: Hi`nreturn`n" } | Out-Null
+        $s = (Get-Json (Invoke-Mcp "get_dialog_script" @{ id = $script:smokeDialog })).script
+        ($s -match "narrator: Hi\r\n") -and -not ($s -match "[^\r]\n")
     }
 
     # ---- Assets ----

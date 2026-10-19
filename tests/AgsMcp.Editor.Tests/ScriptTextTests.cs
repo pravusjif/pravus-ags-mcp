@@ -133,5 +133,19 @@ namespace AgsMcp.Editor.Tests
         {
             Assert.Equal(expected, ScriptText.NormalizeNewlines(input, nl));
         }
+
+        [Theory]
+        [InlineData("a\r\nb\r\n", "a\nb\n", true)]
+        [InlineData("a\nb", "a\r\nb\r\n", true)]
+        [InlineData("a\nb\n\n", "a\nb", true)]
+        [InlineData("", null, true)]
+        [InlineData("a\nb", "a\nc", false)]
+        [InlineData("a\n\nb", "a\nb", false)]
+        [InlineData("a b", "a  b", false)]
+        public void SameIgnoringNewlines(string a, string b, bool expected)
+        {
+            Assert.Equal(expected, ScriptText.SameIgnoringNewlines(a, b));
+            Assert.Equal(expected, ScriptText.SameIgnoringNewlines(b, a));
+        }
     }
 }

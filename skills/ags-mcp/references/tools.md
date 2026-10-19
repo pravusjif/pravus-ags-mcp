@@ -37,11 +37,12 @@ A key a tool does not take is refused with the list of the ones it does.
 | Tool | Notes |
 |---|---|
 | `list_scripts` | Modules (with line counts) and room scripts (`room1`, …). |
-| `read_script name [header] [startLine endLine]` | `name` is a module (`GlobalScript`, `KeyboardMovement`) or `roomN`. `header=true` reads the `.ash`. |
+| `read_script name [header] [startLine endLine]` | `name` is a module (`GlobalScript`, `KeyboardMovement`) or `roomN`. `header=true` reads the `.ash`. `staleOnDisk=true`: the file was changed outside the editor, and this text (the one compiled and saved) is not it; `reload_script` takes the disk version. |
 | `write_script name text [header]` | Replaces the whole file and saves. Use for new room scripts after `set_room_event` has added the stubs (keep the stub names). |
 | `edit_script name find replace [header] [all]` | Exact, newline-agnostic find/replace; `find` must occur exactly once unless `all=true` (include a comment or the function header to make it unique). Saves. |
+| `reload_script name` | Replaces the editor's copy with the file on disk: a module's header and body, or `roomN`. Discards unsaved in-memory edits to it; refuses a room whose other changes are unsaved. Returns `files:[{file, lines, changed}]`. |
 | `create_script_module name [headerText scriptText]` | New `.asc`/`.ash` pair, placed just above GlobalScript so GlobalScript can use its header (a script sees only the headers above it). Needs `save_project` to be recorded in `Game.agf`. |
-| `compile [name]` | No name: all modules. `name=roomN` compiles the room script with its generated header (hotspot/object names). Regenerates the auto-generated header first, so names from a `create_entity`/`create_view` made moments ago resolve. Returns `{ok, errors, warnings, messages:[{severity, script, line, message}]}`. |
+| `compile [name]` | No name: all modules. `name=roomN` compiles the room script with its generated header (hotspot/object names). Regenerates the auto-generated header first, so names from a `create_entity`/`create_view` made moments ago resolve. Returns `{ok, errors, warnings, messages:[{severity, script, line, message}], staleOnDisk:[file]}`; a file in `staleOnDisk` was edited on disk and not compiled, so `reload_script` it and compile again. |
 | `script_api_lookup query` | Signatures and docs from the built-in header and project headers. It can list functions the project's Script API level hides, so a listed name is not a guarantee it compiles. |
 
 ## Rooms

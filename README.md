@@ -190,11 +190,12 @@ take is refused, with the list of the ones it does.
 | Tool | Description |
 |------|-------------|
 | `list_scripts` | List script modules (name, header/body) and room scripts (`roomN`). |
-| `read_script(name, [header], [startLine], [endLine])` | Read a module's body or header, or a room script (`room1`), optionally a line range. |
+| `read_script(name, [header], [startLine], [endLine])` | Read a module's body or header, or a room script (`room1`), optionally a line range. `staleOnDisk` is true when the file was changed outside the editor. |
 | `write_script(name, text, [header])` | Replace a module's or room script's full contents. |
 | `edit_script(name, find, replace, [header], [all])` | Exact find/replace (newline-agnostic). |
+| `reload_script(name)` | Replace the editor's copy of a module (header and body) or room script with the file on disk, after an outside edit. |
 | `create_script_module(name, [headerText], [scriptText])` | Create a new `.asc`/`.ash` module just above GlobalScript, so GlobalScript can use its header. |
-| `compile([name])` | Compile one module (with its preceding headers), a room script (`roomN`, with the room's hotspot/object names) or all modules; returns structured errors/warnings with file and line. |
+| `compile([name])` | Compile one module (with its preceding headers), a room script (`roomN`, with the room's hotspot/object names) or all modules; returns structured errors/warnings with file and line, and `staleOnDisk`: the input files changed on disk outside the editor. |
 | `script_api_lookup(query, [limit])` | Search the built-in API and project headers; returns signatures, source header and `///` docs. |
 
 ### Rooms
