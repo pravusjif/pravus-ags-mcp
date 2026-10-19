@@ -74,11 +74,49 @@ namespace AgsMcp.Editor.Tests
         }
 
         [Fact]
+        public void ShouldRetryBuild_OnLockedFileMessages()
+        {
+            Assert.True(BuildRunTools.ShouldRetryBuild(new[]
+            {
+                "Some warning",
+                @"Failed to delete an old file C:\g\Compiled\Windows\Game.exe.",
+            }));
+            Assert.True(BuildRunTools.ShouldRetryBuild(new[]
+            {
+                "Unable to replace resource: EndUpdateResource for 00000001 failed: 0000006E",
+            }));
+            Assert.True(BuildRunTools.ShouldRetryBuild(new[] { "failed to DELETE an old file x" }));
+        }
+
+        [Fact]
+        public void ShouldRetryBuild_NotOnScriptErrorsOrNothing()
+        {
+            Assert.False(BuildRunTools.ShouldRetryBuild(new[] { "Undefined token 'foo'", "Parse error at line 3" }));
+            Assert.False(BuildRunTools.ShouldRetryBuild(new string[0]));
+            Assert.False(BuildRunTools.ShouldRetryBuild(new string[] { null }));
+            Assert.False(BuildRunTools.ShouldRetryBuild(null));
+        }
+
+        [Fact]
         public void SliceLog_HandlesEmpty()
         {
             var s = BuildRunTools.SliceLog("", 0, 500);
-            Assert.Equal(1, s.TotalLines); // one empty line
-            Assert.Equal(new[] { "" }, s.Lines.ToArray());
+            Assert.Equal(0, s.TotalLines);
+            Assert.Empty(s.Lines);
+            Assert.Equal(0, s.NextLine);
+            Assert.Equal(new[] { "" }, BuildRunTools.SliceLog("\n", 0, 500).Lines.ToArray()); // one empty line
+        }
+
+        [Fact]
+        public void SliceLog_TrailingNewlineEndsTheLastLine_SoAPollSeesTheNextLine()
+        {
+            // The engine writes "message\n" and flushes, so the file always ends with a newline.
+            var first = BuildRunTools.SliceLog("a\r\nb\r\n", 0, 500);
+            Assert.Equal(2, first.TotalLines);
+            Assert.Equal(new[] { "a", "b" }, first.Lines.ToArray());
+            var next = BuildRunTools.SliceLog("a\r\nb\r\nc\r\n", first.NextLine, 500);
+            Assert.Equal(new[] { "c" }, next.Lines.ToArray());
+            Assert.Equal(3, next.NextLine);
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
 namespace AgsMcp.Editor.Tools
@@ -99,6 +100,14 @@ namespace AgsMcp.Editor.Tools
         }
 
         /// <summary>
+        /// True when the two texts differ at most in newline style and in newlines at the very end, the only
+        /// differences a save round-trip introduces. Used to tell whether a script on disk was edited outside
+        /// the editor's in-memory copy.
+        /// </summary>
+        public static bool SameIgnoringNewlines(string a, string b) =>
+            string.Equals(NormalizeNewlines(a, "\n").TrimEnd('\n'), NormalizeNewlines(b, "\n").TrimEnd('\n'), StringComparison.Ordinal);
+
+        /// <summary>
         /// True when the script defines a plain function of that name at the start of a line
         /// (<c>function name(</c>, <c>int name(</c>, <c>static void name(</c>, ...). Import lines, calls and
         /// struct member functions (<c>Type::name</c>) do not count.
@@ -109,6 +118,66 @@ namespace AgsMcp.Editor.Tools
             var definition = new Regex(@"^[ \t]*(?:(?:static|protected)[ \t]+)*(?!import\b|return\b|else\b)[A-Za-z_]\w*[ \t]*\*?[ \t]+" +
                                        Regex.Escape(name) + @"[ \t]*\(", RegexOptions.Multiline);
             return definition.IsMatch(text);
+        }
+
+        /// <summary>A double-quoted string literal: its text as written between the quotes, and its 1-based line.</summary>
+        public sealed class StringLiteral
+        {
+            public string Text;
+            public int Line;
+        }
+
+        /// <summary>
+        /// The double-quoted string literals of a script, as the editor's translation source does
+        /// (GameSpeechProcessor.ProcessScript): comments are skipped, single-quoted character literals are not strings,
+        /// and the text is kept as written (escapes such as <c>\"</c> are not decoded). A backslash escapes the next
+        /// character. A literal unterminated at the end of its line is dropped (AGS strings cannot span lines).
+        /// </summary>
+        public static List<StringLiteral> ExtractStringLiterals(string script)
+        {
+            var result = new List<StringLiteral>();
+            if (string.IsNullOrEmpty(script)) return result;
+            int i = 0, line = 1, n = script.Length;
+            while (i < n)
+            {
+                char c = script[i];
+                if (c == '\n') { line++; i++; continue; }
+                if (c == '/' && i + 1 < n && script[i + 1] == '/')
+                {
+                    while (i < n && script[i] != '\n') i++;
+                    continue;
+                }
+                if (c == '/' && i + 1 < n && script[i + 1] == '*')
+                {
+                    i += 2;
+                    while (i < n && !(script[i] == '*' && i + 1 < n && script[i + 1] == '/'))
+                    {
+                        if (script[i] == '\n') line++;
+                        i++;
+                    }
+                    i += 2;
+                    continue;
+                }
+                if (c == '"' || c == '\'')
+                {
+                    int start = ++i;
+                    bool closed = false;
+                    while (i < n && script[i] != '\n')
+                    {
+                        if (script[i] == '\\' && i + 1 < n && script[i + 1] != '\n') { i += 2; continue; }
+                        if (script[i] == c) { closed = true; break; }
+                        i++;
+                    }
+                    if (closed)
+                    {
+                        if (c == '"') result.Add(new StringLiteral { Text = script.Substring(start, i - start), Line = line });
+                        i++; // past the closing quote
+                    }
+                    continue; // unterminated: resume at the newline
+                }
+                i++;
+            }
+            return result;
         }
     }
 }

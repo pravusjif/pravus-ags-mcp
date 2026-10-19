@@ -29,6 +29,11 @@ namespace AgsMcp.Editor.Tools
         public Func<Game, object, string, JToken, JToken> PrepareProperty;
         /// <summary>Optional follow-up after an entity of this kind is created, changed or deleted (refresh the editor).</summary>
         public Action<Game> AfterChange;
+        /// <summary>
+        /// Optional resolver for ids that matching IdOf/NameOf cannot handle (a guicontrol's "gMain:0" mixes a name and
+        /// an index). Returns the entity or throws a ToolException. Null: match IdOf/NameOf.
+        /// </summary>
+        public Func<Game, string, object> ResolveId;
     }
 
     internal static class EntityRegistry
@@ -49,6 +54,7 @@ namespace AgsMcp.Editor.Tools
             if (idToken == null || idToken.Type == JTokenType.Null)
                 throw new ToolException("An 'id' (numeric ID or script name) is required.");
             string want = idToken.Type == JTokenType.Integer ? idToken.Value<long>().ToString() : idToken.ToString();
+            if (kind.ResolveId != null) return kind.ResolveId(game, want);
             foreach (object e in kind.Enumerate(game))
             {
                 if (string.Equals(kind.IdOf(e), want, StringComparison.OrdinalIgnoreCase)) return e;
@@ -145,6 +151,16 @@ namespace AgsMcp.Editor.Tools
                 },
                 new EntityKind
                 {
+                    // A control on a GUI, addressed "gui:control" where each side is a name or an index ("gMain:btnOk",
+                    // "2:0"). Created and deleted by create_gui_control/delete_gui_control (GuiTools).
+                    Name = "guicontrol", NameProperty = "Name",
+                    Enumerate = g => g.GUIFlatList.SelectMany(gui => gui.Controls).Cast<object>(),
+                    IdOf = e => ((GUIControl)e).Parent?.ID + ":" + ((GUIControl)e).ID,
+                    NameOf = e => ((GUIControl)e).Parent?.Name + ":" + ((GUIControl)e).Name,
+                    ResolveId = (g, id) => GuiTools.ResolveControl(g, id),
+                },
+                new EntityKind
+                {
                     Name = "view", NameProperty = "Name",
                     Enumerate = g => g.ViewFlatList.Cast<object>(),
                     IdOf = e => ((View)e).ID.ToString(),
@@ -181,12 +197,14 @@ namespace AgsMcp.Editor.Tools
                 },
                 new EntityKind
                 {
-                    // Fonts and audio clips are backed by resource files: audio clips are created by import_audio
-                    // (AudioTools); fonts cannot be created yet.
+                    // A font is backed by its agsfnt<ID> file: create copies one ('CopyFrom', default font 0) as the
+                    // editor's New Font does, and import_font replaces it (FontTools).
                     Name = "font", NameProperty = null,
                     Enumerate = g => g.Fonts.Cast<object>(),
                     IdOf = e => ((Font)e).ID.ToString(),
                     NameOf = e => ((Font)e).ScriptID,
+                    Create = FontTools.CreateFont,
+                    AfterChange = FontTools.AfterChange,
                 },
                 new EntityKind
                 {

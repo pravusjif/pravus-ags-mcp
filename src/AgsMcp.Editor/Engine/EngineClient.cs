@@ -66,6 +66,9 @@ namespace AgsMcp.Editor.Engine
         private JObject Exchange(string line, int timeoutMs)
         {
             EnsureConnected(timeoutMs);
+            // Per call, not per connection: a screenshot burst waits longer than the default on the same connection.
+            _client.ReceiveTimeout = _client.SendTimeout = timeoutMs;
+            _stream.ReadTimeout = _stream.WriteTimeout = timeoutMs;
             byte[] bytes = Encoding.UTF8.GetBytes(line);
             _stream.Write(bytes, 0, bytes.Length);
             _stream.Flush();

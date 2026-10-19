@@ -23,6 +23,24 @@ namespace AgsMcp.Editor.Tests
             Assert.Equal(code, KeyMap.Resolve(name));
         }
 
+        [Fact]
+        public void FindLogLine_FindsTheFirstMatchAtOrAfterSince()
+        {
+            var lines = new[] { "Script : MCPKEY 65", "Game : (room:1) Running on_key_press", "Script : MCPKEY 372", "Script : MCPKEY 365" };
+            Assert.Equal(0, GameWait.FindLogLine(lines, "MCPKEY", 0));
+            Assert.Equal(2, GameWait.FindLogLine(lines, "MCPKEY", 1));
+            Assert.Equal(3, GameWait.FindLogLine(lines, @"MCPKEY 36\d", 0));
+            Assert.Equal(-1, GameWait.FindLogLine(lines, "MCPTXT", 0));
+            Assert.Equal(-1, GameWait.FindLogLine(lines, "MCPKEY", 4)); // since past the end
+            Assert.Equal(0, GameWait.FindLogLine(lines, "MCPKEY", -5));
+        }
+
+        [Fact]
+        public void FindLogLine_RefusesABadPattern()
+        {
+            Assert.ThrowsAny<System.ArgumentException>(() => GameWait.FindLogLine(new[] { "x" }, "(", 0));
+        }
+
         [Theory]
         [InlineData("A", 65)]
         [InlineData("a", 65)]
@@ -32,6 +50,53 @@ namespace AgsMcp.Editor.Tests
         public void KeyMap_SingleChars(string name, int code)
         {
             Assert.Equal(code, KeyMap.Resolve(name));
+        }
+
+        [Theory]
+        [InlineData(8)]   // Backspace
+        [InlineData(9)]   // Tab
+        [InlineData(13)]  // Enter
+        [InlineData(359)] // F1
+        [InlineData(368)] // F10
+        [InlineData(433)] // F11
+        [InlineData(434)] // F12
+        [InlineData(371)] // Home
+        [InlineData(372)] // Up
+        [InlineData(373)] // PageUp
+        [InlineData(375)] // Left
+        [InlineData(377)] // Right
+        [InlineData(379)] // End
+        [InlineData(380)] // Down
+        [InlineData(381)] // PageDown
+        [InlineData(382)] // Insert
+        [InlineData(383)] // Delete
+        public void KeyMap_WindowRoutedKeys(int code)
+        {
+            Assert.True(KeyMap.IsWindowRouted(code));
+        }
+
+        [Theory]
+        [InlineData(1)]   // Ctrl+A stays SimulateKeyPress
+        [InlineData(27)]  // Escape
+        [InlineData(32)]  // Space
+        [InlineData(65)]  // A
+        [InlineData(48)]  // 0
+        [InlineData(374)] // keypad codes between the navigation keys
+        [InlineData(376)]
+        [InlineData(378)]
+        [InlineData(369)]
+        [InlineData(384)]
+        [InlineData(301)] // Alt+A
+        public void KeyMap_OtherKeysUseSimulateKeyPress(int code)
+        {
+            Assert.False(KeyMap.IsWindowRouted(code));
+        }
+
+        [Fact]
+        public void KeyMap_NavigationAndFunctionKeyNamesAreWindowRouted()
+        {
+            foreach (string name in new[] { "Home", "Up", "PageUp", "Left", "Right", "End", "Down", "PageDown", "Insert", "Delete", "F1", "F7", "F11", "F12" })
+                Assert.True(KeyMap.IsWindowRouted(KeyMap.Resolve(name)), name);
         }
 
         [Fact]

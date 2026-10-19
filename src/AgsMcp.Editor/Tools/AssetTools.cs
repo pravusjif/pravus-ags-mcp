@@ -22,6 +22,8 @@ namespace AgsMcp.Editor.Tools
         {
             yield return ImportSprite(ctx);
             yield return GetSprite(ctx);
+            yield return ListSprites(ctx);
+            yield return CreateSpriteFolder(ctx);
             yield return ReplaceSprite(ctx);
             yield return DeleteSprite(ctx);
             yield return CreateView(ctx);
@@ -81,7 +83,10 @@ namespace AgsMcp.Editor.Tools
             Name = "get_sprite",
             Title = "Get sprite",
             Description = "Return a sprite's image as a PNG, by sprite number. Reads only.",
-            InputSchema = Schema.Object().Required("number", Schema.Integer("The sprite number.")).Build(),
+            InputSchema = Schema.Object()
+                .Required("number", Schema.Integer("The sprite number."))
+                .Optional(ImageOutput.Arg, ImageOutput.Prop())
+                .Build(),
             Annotations = ToolAnnotations.ReadOnlyTool,
             Timeout = TimeSpan.FromSeconds(90),
             Handler = args =>
@@ -92,13 +97,83 @@ namespace AgsMcp.Editor.Tools
                     ?? throw new ToolException($"No sprite numbered {n}.");
                 using (Bitmap bmp = EditorInternals.GetSpriteBitmap(n))
                 {
-                    byte[] png = ToPng(bmp);
-                    var result = new ToolResult();
-                    result.AddText($"Sprite {n} ({bmp.Width}x{bmp.Height}, {sprite.ColorDepth}-bit{(sprite.AlphaChannel ? ", alpha" : "")}).");
-                    result.AddImage(png, "image/png");
-                    return result;
+                    string note = $"Sprite {n} ({bmp.Width}x{bmp.Height}, {sprite.ColorDepth}-bit{(sprite.AlphaChannel ? ", alpha" : "")}).";
+                    return ImageOutput.Result(args, ToPng(bmp), bmp.Width, bmp.Height, note);
                 }
             },
+        };
+
+        private static Tool ListSprites(ToolContext ctx) => new Tool
+        {
+            Name = "list_sprites",
+            Title = "List sprites",
+            Description = "List the sprite folders and their sprites ({number, width, height, colorDepth, alphaChannel}), as a " +
+                          "tree from 'folder' (default: the root folder). flat=true returns every sprite under that folder in " +
+                          "one list, sorted by number. Folder names are what import_sprite's and create_sprite_folder's " +
+                          "'folder'/'parent' take.",
+            InputSchema = Schema.Object()
+                .Optional("folder", Schema.String("Sprite folder to start from (default: the root folder)."))
+                .Optional("flat", Schema.Boolean("One sorted list of every sprite under the folder instead of a tree. Default false."))
+                .Build(),
+            Annotations = ToolAnnotations.ReadOnlyTool,
+            Handler = args =>
+            {
+                Game game = ctx.RequireGame();
+                SpriteFolder folder = ResolveFolder(game, args.String("folder", null));
+                if (args.Bool("flat", false))
+                {
+                    var sprites = folder.GetAllSpritesFromAllSubFolders().OrderBy(s => s.Number).Select(DescribeSprite).ToList();
+                    return ToolResult.Json(new { folder = folder.Name, count = sprites.Count, sprites });
+                }
+                return ToolResult.Json(DescribeFolder(folder));
+            },
+        };
+
+        private static Tool CreateSpriteFolder(ToolContext ctx) => new Tool
+        {
+            Name = "create_sprite_folder",
+            Title = "Create sprite folder",
+            Description = "Create a sprite folder inside 'parent' (default: the root folder). Folder names are unique across " +
+                          "the project, because the sprite tools find folders by name: a taken name gets a number appended, " +
+                          "and the actual name is returned. Put sprites in it with import_sprite folder=<name>. Call " +
+                          "save_project to persist.",
+            InputSchema = Schema.Object()
+                .Required("name", Schema.String("Folder name."))
+                .Optional("parent", Schema.String("Folder to create it in (default: the root folder)."))
+                .Build(),
+            Annotations = ToolAnnotations.Mutating,
+            Handler = args =>
+            {
+                Game game = ctx.RequireGame();
+                string baseName = args.String("name").Trim();
+                if (baseName.Length == 0) throw new ToolException("'name' must not be empty.");
+                SpriteFolder parent = ResolveFolder(game, args.String("parent", null));
+                string name = baseName;
+                for (int n = 1; FindFolder(game.RootSpriteFolder, name) != null; n++) name = baseName + n;
+
+                var folder = new SpriteFolder(name);
+                parent.SubFolders.Add(folder);
+                try
+                {
+                    // Redraws the Sprite Manager's folder tree if it is open; tools run on the main-window thread.
+                    game.RootSpriteFolder.NotifyClientsOfUpdate();
+                }
+                catch (Exception e)
+                {
+                    Logger.Write("Could not refresh the sprite folder tree: " + e.Message);
+                }
+                return ToolResult.Json(new { name, parent = parent.Name, created = true });
+            },
+        };
+
+        private static object DescribeSprite(Sprite s) =>
+            new { number = s.Number, width = s.Width, height = s.Height, colorDepth = s.ColorDepth, alphaChannel = s.AlphaChannel };
+
+        private static object DescribeFolder(SpriteFolder folder) => new
+        {
+            name = folder.Name,
+            sprites = folder.Sprites.Select(DescribeSprite).ToList(),
+            folders = folder.SubFolders.Cast<SpriteFolder>().Select(DescribeFolder).ToList(),
         };
 
         private static Tool ReplaceSprite(ToolContext ctx) => new Tool

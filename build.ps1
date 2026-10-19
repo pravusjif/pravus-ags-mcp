@@ -6,13 +6,14 @@
   .\build.ps1                         # build (Release)
   .\build.ps1 -Test                   # build + unit tests
   .\build.ps1 -Deploy                 # build + copy DLLs into $AgsDir (editor must be closed)
-  .\build.ps1 -Deploy -Run            # ...then start the editor (-Game <Game.agf> opens that game)
+  .\build.ps1 -Deploy -Run            # ...then start the editor and open -Game <Game.agf>, else SmokeGame
   .\build.ps1 -Deploy -StopEditor     # close a running editor first (unsaved work is lost!)
   .\build.ps1 -Engine                 # build the native engine plugin (agsmcp.dll) with CMake
   .\build.ps1 -Engine -Deploy         # ...and copy agsmcp.dll into $AgsDir
   .\build.ps1 -Engine -Package        # build both and zip a release into dist\
 
-  -AgsDir defaults to AgsDir in Local.props (see Local.props.example).
+  -AgsDir defaults to AgsDir in Local.props (see Local.props.example). -Game defaults to SmokeGame from Local.props,
+  else %LOCALAPPDATA%\AGS-MCP\SmokeGame\Game.agf; -Run creates that throwaway game from a template when it is missing.
 #>
 param(
     [string]$AgsDir,
@@ -28,7 +29,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
-. "$root\tools\LocalProps.ps1"
+. "$root\tools\SmokeGame.ps1"  # also dot-sources LocalProps.ps1
 if (-not $AgsDir) { $AgsDir = Get-LocalProp AgsDir }
 
 if (-not $AgsDir -or -not (Test-Path (Join-Path $AgsDir "AGSEditor.exe"))) {
@@ -75,6 +76,7 @@ if ($Package) {
     Copy-Item $pluginDll, $engineDll, "$root\install.ps1", "$root\README.md", "$root\LICENSE" $stage
     Copy-Item "$root\skills\ags-mcp" "$stage\skills\ags-mcp" -Recurse
     Remove-Item "$stage\skills\ags-mcp\evals" -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem "$stage\skills" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
     $zip = "$dist\$name.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
     # Entries are added one by one because Windows PowerShell's ZipFile.CreateFromDirectory writes "\" separators.
@@ -96,6 +98,15 @@ if ($Deploy) {
         if (-not $StopEditor) {
             throw "The AGS editor is running and locks the plugin DLL. Close it (or pass -StopEditor) and retry."
         }
+        # Save the open game first through the running server, so killing the editor loses nothing. This fails
+        # harmlessly when no game is open, the server is down or a modal dialog holds the UI thread.
+        try {
+            $body = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"save_project","arguments":{}}}'
+            $resp = Invoke-WebRequest "http://127.0.0.1:7471/mcp" -Method Post -ContentType application/json -Body $body -TimeoutSec 30 -UseBasicParsing
+            $result = ($resp.Content | ConvertFrom-Json).result
+            if ($result -and -not $result.isError) { Write-Host "Saved the open game before stopping the editor" -ForegroundColor Yellow }
+            else { Write-Warning "Could not save the open game before stopping the editor: $($resp.Content)" }
+        } catch { Write-Warning "Could not save the open game before stopping the editor: $($_.Exception.Message)" }
         Write-Host "Stopping the AGS editor" -ForegroundColor Yellow
         $editor | Stop-Process -Force
         $editor | Wait-Process -Timeout 15 -ErrorAction SilentlyContinue
@@ -115,8 +126,8 @@ if ($Deploy) {
 
 if ($Run) {
     $editor = Join-Path $AgsDir "AGSEditor.exe"
-    # Start-Process rejects an empty -ArgumentList, so pass it only when there is a game to open.
-    if ($Game -and (Test-Path $Game)) { Start-Process $editor -ArgumentList "`"$Game`"" -WorkingDirectory $AgsDir }
-    else { Start-Process $editor -WorkingDirectory $AgsDir }
+    if (-not $Game) { $Game = Get-SmokeGame $AgsDir }
+    if (-not (Test-Path $Game)) { throw "Game '$Game' not found." }
+    Start-Process $editor -ArgumentList "`"$Game`"" -WorkingDirectory $AgsDir
     Write-Host "Started the AGS editor. MCP endpoint: http://127.0.0.1:7471/mcp" -ForegroundColor Green
 }

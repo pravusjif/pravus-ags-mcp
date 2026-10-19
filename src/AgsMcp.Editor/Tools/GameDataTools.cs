@@ -32,7 +32,7 @@ namespace AgsMcp.Editor.Tools
             Schema.String("Entity type: " + string.Join(", ", EntityRegistry.TypeNames) + ".");
 
         private static JObject IdProp() =>
-            Schema.String("The entity's numeric ID or its script name. (For globalvariable/customproperty/audiofolder, the name; for audiocliptype, the TypeID or name.)");
+            Schema.String("The entity's numeric ID or its script name. (For globalvariable/customproperty/audiofolder, the name; for audiocliptype, the TypeID or name; for guicontrol, \"<gui>:<control>\" with names or IDs, e.g. \"gMain:btnOk\" or \"2:0\".)");
 
         private static Tool ListEntities(ToolContext ctx) => new Tool
         {
@@ -73,7 +73,7 @@ namespace AgsMcp.Editor.Tools
                     id = kind.IdOf(entity),
                     name = kind.NameOf(entity),
                     properties = PropertyReflection.Describe(entity),
-                    events = DescribeEvents(InteractionsOf(entity)),
+                    events = entity is GUI || entity is GUIControl ? (object)GuiTools.DescribeEvents(entity) : DescribeEvents(InteractionsOf(entity)),
                 });
             },
         };
@@ -110,6 +110,7 @@ namespace AgsMcp.Editor.Tools
                           string.Join(", ", EntityRegistry.TypeNames.Where(IsCreatable)) + ". " +
                           "globalvariable, customproperty, audiocliptype and audiofolder require a 'Name' in properties; others are auto-named. " +
                           "An audiofolder also takes an optional 'Parent' folder name (default: the root). Audio clips come from import_audio. " +
+                          "A font is a copy of font 0, or of the font given as 'CopyFrom' (ID or script name), file included; replace its file with import_font. " +
                           "Any other given properties are applied to the new entity. Call save_project to persist.",
             InputSchema = Schema.Object()
                 .Required("type", TypeProp())
@@ -121,7 +122,8 @@ namespace AgsMcp.Editor.Tools
                 Game game = ctx.RequireGame();
                 EntityKind kind = EntityRegistry.Get(args.String("type"));
                 if (kind.Create == null)
-                    throw new ToolException($"Entities of type '{kind.Name}' cannot be created with this tool." + (kind.Name == "audioclip" ? " Use import_audio." : ""));
+                    throw new ToolException($"Entities of type '{kind.Name}' cannot be created with this tool." +
+                                            (kind.Name == "audioclip" ? " Use import_audio." : kind.Name == "guicontrol" ? " Use create_gui_control." : ""));
 
                 JObject props = args.Has("properties") ? args.Object("properties") : new JObject();
                 object entity = kind.Create(game, props);
@@ -157,7 +159,8 @@ namespace AgsMcp.Editor.Tools
                 Game game = ctx.RequireGame();
                 EntityKind kind = EntityRegistry.Get(args.String("type"));
                 if (kind.Delete == null)
-                    throw new ToolException($"Entities of type '{kind.Name}' cannot be deleted with this tool." + (kind.Name == "audioclip" ? " Use delete_audio." : ""));
+                    throw new ToolException($"Entities of type '{kind.Name}' cannot be deleted with this tool." +
+                                            (kind.Name == "audioclip" ? " Use delete_audio." : kind.Name == "guicontrol" ? " Use delete_gui_control." : ""));
                 object entity = EntityRegistry.Resolve(kind, game, args.Raw["id"]);
                 string id = kind.IdOf(entity), name = kind.NameOf(entity);
                 kind.Delete(game, entity);
@@ -216,7 +219,9 @@ namespace AgsMcp.Editor.Tools
                     dialog.Options.Clear();
                     dialog.Options.AddRange(options);
                 }
-                if (args.Has("script")) dialog.Script = args.String("script");
+                // CRLF, as the editor writes it: its dialog pane finds an option's section by Environment.NewLine + "@N"
+                // and appends a duplicate when the script uses LF.
+                if (args.Has("script")) dialog.Script = ScriptText.NormalizeNewlines(args.String("script"), "\r\n");
                 return ToolResult.Json(new { id = dialog.ID.ToString(), name = dialog.Name, options = dialog.Options.Count, updated = true });
             },
         };
@@ -280,14 +285,16 @@ namespace AgsMcp.Editor.Tools
         {
             Name = "set_event",
             Title = "Set event",
-            Description = "Bind a character or inventory item event to a script function and add an empty stub for it to the " +
-                          "script that holds its handlers (GlobalScript), like clicking the event's '...' button in the editor. " +
-                          "Fill the stub in with edit_script. 'event' is the event suffix or display name: characters have " +
-                          "Look, Interact, Talk, UseInv, AnyClick, PickUp, Mode8, Mode9; inventory items Look, Interact, Talk, " +
-                          "UseInv, OtherClick (get_properties lists them with their bound functions). 'function' defaults " +
-                          "to <scriptName>_<event>. Call save_project to persist the binding.",
+            Description = "Bind a character, inventory item, GUI or GUI control event to a script function and add an empty stub " +
+                          "for it to the script that holds its handlers (GlobalScript, or the GUI's ScriptModule), like clicking the " +
+                          "event's '...' button in the editor. Fill the stub in with edit_script. 'event' is the event suffix or " +
+                          "display name: characters have Look, Interact, Talk, UseInv, AnyClick, PickUp, Mode8, Mode9; inventory " +
+                          "items Look, Interact, Talk, UseInv, OtherClick; a GUI OnClick; buttons OnClick, list boxes " +
+                          "OnSelectionChanged, text boxes OnActivate, sliders OnChange (get_properties lists them with their bound " +
+                          "functions). A guicontrol id is \"<gui>:<control>\". 'function' defaults to <scriptName>_<event> " +
+                          "(btnOk_OnClick for a control). Call save_project to persist the binding.",
             InputSchema = Schema.Object()
-                .Required("type", Schema.String("Entity type.", "character", "inventory"))
+                .Required("type", Schema.String("Entity type.", "character", "inventory", "gui", "guicontrol"))
                 .Required("id", IdProp())
                 .Required("event", Schema.String("Event suffix or display name, e.g. \"Look\", \"Interact\", \"Talk\", \"UseInv\"."))
                 .Optional("function", Schema.String("Script function name to bind (defaults to <scriptName>_<event>)."))
@@ -297,9 +304,11 @@ namespace AgsMcp.Editor.Tools
             {
                 Game game = ctx.RequireGame();
                 EntityKind kind = EntityRegistry.Get(args.String("type"));
-                if (kind.Name != "character" && kind.Name != "inventory")
-                    throw new ToolException("set_event supports characters and inventory items; use set_room_event for rooms, hotspots, objects and regions.");
+                if (kind.Name != "character" && kind.Name != "inventory" && kind.Name != "gui" && kind.Name != "guicontrol")
+                    throw new ToolException("set_event supports characters, inventory items, GUIs and GUI controls; use set_room_event for rooms, hotspots, objects and regions.");
                 object entity = EntityRegistry.Resolve(kind, game, args.Raw["id"]);
+                if (kind.Name == "gui" || kind.Name == "guicontrol")
+                    return ToolResult.Json(GuiTools.BindEvent(ctx, game, kind, entity, args.String("event"), args.String("function", null)));
                 Interactions interactions = InteractionsOf(entity);
 
                 int index = RoomTools.FindEventIndex(interactions, args.String("event"));
@@ -317,14 +326,7 @@ namespace AgsMcp.Editor.Tools
                 interactions.SetScriptFunctionNameForInteractionSuffix(suffix, funcName);
                 string newText = EditorInternals.InsertFunction(script.Text, funcName, paramList);
                 bool stubAdded = newText != script.Text;
-                if (stubAdded)
-                {
-                    script.Text = newText;
-                    script.Modified = true;
-                    script.SaveToDisk();
-                    ctx.Editor.RebuildAutocompleteCache(script);
-                    EditorInternals.NotifyScriptChanged(script);
-                }
+                if (stubAdded) ScriptTools.Save(ctx, script, newText);
                 return ToolResult.Json(new
                 {
                     type = kind.Name,
@@ -412,7 +414,7 @@ namespace AgsMcp.Editor.Tools
         /// Applies props to the entity. With <paramref name="ignored"/> (during create) a key that is not a settable
         /// property is skipped and listed there, unless creation consumed it; otherwise Apply raises the precise error.
         /// </summary>
-        private static List<string> ApplyProperties(Game game, EntityKind kind, object entity, JObject props, List<object> ignored = null)
+        internal static List<string> ApplyProperties(Game game, EntityKind kind, object entity, JObject props, List<object> ignored = null)
         {
             if (props == null || !props.HasValues) return new List<string>();
 
@@ -425,7 +427,8 @@ namespace AgsMcp.Editor.Tools
                 {
                     if (ignored != null)
                     {
-                        bool consumed = KindsReadingCreationKeys.Contains(kind.Name) && CreationKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase);
+                        bool consumed = (KindsReadingCreationKeys.Contains(kind.Name) && CreationKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase)) ||
+                                        (kind.Name == "font" && string.Equals(pair.Key, "CopyFrom", StringComparison.OrdinalIgnoreCase));
                         if (!consumed)
                             ignored.Add(new { key = pair.Key, reason = IgnoredReason(kind, pd, pair.Key) });
                         continue;
@@ -439,7 +442,8 @@ namespace AgsMcp.Editor.Tools
                 if (kind.NameProperty != null && string.Equals(pd.Name, kind.NameProperty, StringComparison.Ordinal))
                 {
                     string newName = pair.Value?.ToString() ?? string.Empty;
-                    bool unchanged = string.Equals(kind.NameOf(entity), newName, StringComparison.Ordinal);
+                    // The property's own value: NameOf can differ from it (a guicontrol's is "gui:control").
+                    bool unchanged = string.Equals(pd.GetValue(entity)?.ToString(), newName, StringComparison.Ordinal);
                     if (kind.Name == "globalvariable" && !unchanged)
                         throw new ToolException("Rename a global variable by deleting and recreating it (its name is its dictionary key).");
                     if (!unchanged && game.IsScriptNameAlreadyUsed(newName, entity))

@@ -165,26 +165,36 @@ namespace AgsMcp.Editor.Mcp
                 return ErrorResponse(id, -32602, "Unknown tool: " + (name ?? "(none)"));
             }
 
-            var rawArgs = p["arguments"] as JObject;
+            return Result(id, InvokeTool(name, p["arguments"] as JObject).ToJson());
+        }
+
+        /// <summary>
+        /// Runs one tool as tools/call does: the undeclared-argument check, then the handler through the executor
+        /// (so a UI-thread tool still runs on the UI thread, one at a time). Every failure, including an unknown
+        /// tool, comes back as an error result; this never throws. Used by tools/call and by the batch tool.
+        /// </summary>
+        public ToolResult InvokeTool(string name, JObject rawArgs)
+        {
+            if (name == null || !_tools.TryGetValue(name, out var tool))
+                return ToolResult.Error("Unknown tool: " + (name ?? "(none)"));
+
             string unknown = UnknownArguments(tool, rawArgs);
-            if (unknown != null) return Result(id, ToolResult.Error(unknown).ToJson());
+            if (unknown != null) return ToolResult.Error(unknown);
 
             var args = new ToolArgs(rawArgs);
-            ToolResult result;
             try
             {
-                result = _executor.Execute(tool, () => tool.Handler(args));
+                return _executor.Execute(tool, () => tool.Handler(args));
             }
             catch (ToolException e)
             {
-                result = ToolResult.Error(e.Message);
+                return ToolResult.Error(e.Message);
             }
             catch (Exception e)
             {
                 Log("Tool " + name + " failed: " + e);
-                result = ToolResult.Error(e.GetType().Name + ": " + e.Message);
+                return ToolResult.Error(e.GetType().Name + ": " + e.Message);
             }
-            return Result(id, result.ToJson());
         }
 
         /// <summary>

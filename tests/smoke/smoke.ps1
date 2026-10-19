@@ -4,8 +4,9 @@
   over HTTP, on a throwaway game it creates itself.
 
 .DESCRIPTION
-  Requires the AGS editor running with the MCP server up (build.ps1 -Engine -Deploy -Run). The engine
-  plugin (agsmcp.dll) must be deployed next to AGSEditor.exe so runtime_enable_plugin can find it.
+  Requires the AGS editor running with the MCP server up and a game open (build.ps1 -Engine -Deploy -Run
+  opens -Game <Game.agf>, else the smoke game, see tools/SmokeGame.ps1). The engine plugin (agsmcp.dll) must be
+  deployed next to AGSEditor.exe so runtime_enable_plugin can find it.
 
   The test creates a new game from the Sierra-style template in a temp folder (create_project), runs
   every check against it, then reopens the game that was open before and deletes the temp game. No
@@ -79,6 +80,7 @@ try { $previousGame = (Get-Json (Invoke-Mcp "project_info")).projectFolder } cat
 
 function Remove-SmokeGame {
     try { Invoke-Mcp "stop_game" | Out-Null } catch { }
+    try { Invoke-Mcp "desktop_stop" | Out-Null } catch { }
     if (-not $previousGame) {
         Write-Host "No game was open before the run, so the smoke game stays open at $Folder. Delete it after closing it." -ForegroundColor Yellow
         return
@@ -114,6 +116,10 @@ try {
         $info = Get-Json (Invoke-Mcp "project_info")
         $info.gameName -eq "MCP Smoke" -and (Split-Path -Leaf $info.projectFolder) -eq (Split-Path -Leaf $Folder)
     }
+    Check "batch runs project_info and list_rooms in one call" {
+        $r = Get-Json (Invoke-Mcp "batch" @{ calls = @(@{ name = "project_info" }, @{ name = "list_rooms" }) })
+        -not $r.stopped -and $r.results.Count -eq 2 -and $r.results[0].ok -and $r.results[0].content[0].gameName -eq "MCP Smoke" -and $r.results[1].ok
+    }
     Check "list_entities character lists cEgo" {
         $e = Get-Json (Invoke-Mcp "list_entities" @{ type = "character" })
         ($e | ConvertTo-Json -Depth 10) -match "cEgo"
@@ -144,7 +150,27 @@ try {
     Check "compile is clean after the fix" {
         Invoke-Mcp "write_script" @{ name = "McpSmoke"; text = "// fixed`r`nint ok_value = 1;" } | Out-Null
         $r = Get-Json (Invoke-Mcp "compile")
-        $r.ok -eq $true
+        $r.ok -eq $true -and $r.staleOnDisk.Count -eq 0
+    }
+    Check "a disk edit shows as staleOnDisk in read_script and compile" {
+        Set-Content (Join-Path $Folder "McpSmoke.asc") "// edited on disk`r`nint ok_value = 2;"
+        $r = Get-Json (Invoke-Mcp "read_script" @{ name = "McpSmoke" })
+        $c = Get-Json (Invoke-Mcp "compile" @{ name = "McpSmoke" })
+        $r.staleOnDisk -eq $true -and $r.text -match "fixed" -and ($c.staleOnDisk -contains "McpSmoke.asc")
+    }
+    Check "move_script_module moves McpSmoke to the top and list_scripts follows" {
+        $m = Get-Json (Invoke-Mcp "move_script_module" @{ name = "McpSmoke"; direction = "index"; index = 0 })
+        $l = Get-Json (Invoke-Mcp "list_scripts")
+        $refused = $false
+        try { Invoke-Mcp "move_script_module" @{ name = "GlobalScript"; direction = "up" } | Out-Null } catch { $refused = $_.Exception.Message -match "cannot be moved" }
+        $m.to -eq 0 -and $m.moved -and $l.modules[0].name -eq "McpSmoke" -and $refused
+    }
+    Check "reload_script takes the disk version and clears staleOnDisk" {
+        $l = Get-Json (Invoke-Mcp "reload_script" @{ name = "McpSmoke" })
+        $r = Get-Json (Invoke-Mcp "read_script" @{ name = "McpSmoke" })
+        $disk = (Get-Content (Join-Path $Folder "McpSmoke.asc")) -join "`n"
+        ($l.files | Where-Object { $_.file -eq "McpSmoke.asc" }).changed -eq $true -and
+            $r.staleOnDisk -eq $false -and $r.text -eq $disk
     }
 
     # ---- Rooms ----
@@ -154,6 +180,14 @@ try {
         $r.size.width -eq 320 -and $r.hotspots.Count -gt 0
     }
     Check "render_room(1) returns a PNG image" { Has-Image (Invoke-Mcp "render_room" @{ number = 1 }) }
+    Check "render_room and get_sprite outPath write PNG files and return text only" {
+        $room = Join-Path $Folder "out\room1.png"; $sprite = Join-Path $Folder "out\sprite0.png"
+        $r = Invoke-Mcp "render_room" @{ number = 1; outPath = $room }
+        $s = Invoke-Mcp "get_sprite" @{ number = 0; outPath = $sprite }
+        $j = Get-Json $r
+        -not (Has-Image $r) -and -not (Has-Image $s) -and (Get-Item $room).Length -gt 0 -and (Get-Item $sprite).Length -gt 0 -and
+            $j.width -gt 0 -and $j.path -eq $room
+    }
     Check "get_mask_pixel reads the walkable mask" {
         $r = Get-Json (Invoke-Mcp "get_mask_pixel" @{ number = 1; mask = "WalkableAreas"; x = 160; y = 140 })
         $r -ne $null
@@ -184,7 +218,7 @@ try {
         $r.save.saved -and ($r.changed -contains "Name")
     }
     Check "create_room_object adds an object" {
-        $r = Get-Json (Invoke-Mcp "create_room_object" @{ number = 2; properties = @{ Name = "oSmoke"; Image = 0; StartX = 200; StartY = 170 } })
+        $r = Get-Json (Invoke-Mcp "create_room_object" @{ number = 2; properties = @{ Name = "oSmoke"; Description = "Smoke pot"; Image = 0; StartX = 200; StartY = 170 } })
         $r.created -and $r.name -eq "oSmoke"
     }
     Check "set_room_event binds hSmoke Look and adds a stub" {
@@ -193,9 +227,17 @@ try {
     }
     Check "room script is readable, editable and compiles" {
         $t = (Get-Json (Invoke-Mcp "read_script" @{ name = "room2" })).text
-        Invoke-Mcp "edit_script" @{ name = "room2"; find = "function hSmoke_Look(Hotspot *theHotspot, CursorMode mode)`n{`n"; replace = "function hSmoke_Look(Hotspot *theHotspot, CursorMode mode)`n{`n  player.Say(`"smoke`");`n" } | Out-Null
+        # MCP_RoomPing is for game_call_function roomScript=true; MCPLOOK shows game_run_interaction ran the Look event.
+        Invoke-Mcp "edit_script" @{ name = "room2"; find = "function hSmoke_Look(Hotspot *theHotspot, CursorMode mode)`n{`n"; replace = "function MCP_RoomPing()`n{`n  System.Log(eLogInfo, `"MCPROOM`");`n}`n`nfunction hSmoke_Look(Hotspot *theHotspot, CursorMode mode)`n{`n  System.Log(eLogInfo, `"MCPLOOK`");`n  player.Say(`"smoke`");`n" } | Out-Null
         $c = Get-Json (Invoke-Mcp "compile" @{ name = "room2" })
         ($t -match "hSmoke_Look") -and $c.ok
+    }
+    Check "reload_script reloads a room script edited on disk" {
+        Add-Content (Join-Path $Folder "room2.asc") "// reloaded from disk"
+        $before = (Get-Json (Invoke-Mcp "read_script" @{ name = "room2" })).staleOnDisk
+        Invoke-Mcp "reload_script" @{ name = "room2" } | Out-Null
+        $r = Get-Json (Invoke-Mcp "read_script" @{ name = "room2" })
+        $before -eq $true -and $r.staleOnDisk -eq $false -and $r.text -match "reloaded from disk"
     }
     Check "render_room(2) with a mask overlay names the areas" {
         $r = Invoke-Mcp "render_room" @{ number = 2; mask = "walkableareas" }
@@ -208,9 +250,74 @@ try {
         $d = Get-Json (Invoke-Mcp "create_entity" @{ type = "dialog" })
         Invoke-Mcp "set_dialog_script" @{ id = $d.name; options = @(@{ text = "Hello" }, @{ text = "Bye"; show = $false }) } | Out-Null
         $g = Get-Json (Invoke-Mcp "get_dialog_script" @{ id = $d.name })
+        $script:smokeDialog = $d.name
         $g.options.Count -eq 2 -and $g.options[1].show -eq $false
     }
+    Check "set_dialog_script stores an LF script with CRLF" {
+        Invoke-Mcp "set_dialog_script" @{ id = $script:smokeDialog; script = "@S`nreturn`n@1`nnarrator: Hi`nreturn`n" } | Out-Null
+        $s = (Get-Json (Invoke-Mcp "get_dialog_script" @{ id = $script:smokeDialog })).script
+        ($s -match "narrator: Hi\r\n") -and -not ($s -match "[^\r]\n")
+    }
+    Check "list_strings lists the smoke dialog's options and its speech line" {
+        $o = Get-Json (Invoke-Mcp "list_strings" @{ type = "DialogOption"; limit = 1000 })
+        $mine = @($o.strings | Where-Object { $_.source -like "dialog $($script:smokeDialog) option *" })
+        $d = Get-Json (Invoke-Mcp "list_strings" @{ type = "DialogScript"; contains = "Hi" })
+        $line = $d.strings | Where-Object { $_.source -eq "dialog $($script:smokeDialog)" -and $_.text -eq "Hi" }
+        $mine.Count -eq 2 -and ($mine.text -contains "Hello") -and ($mine.text -contains "Bye") -and
+            -not ($o.strings | Where-Object { $_.type -ne "DialogOption" }) -and $line.speaker -eq "narrator" -and $line.line -eq 4
+    }
+    Check "list_strings rooms=true adds room text and reopens the loaded room" {
+        $all = Get-Json (Invoke-Mcp "list_strings" @{ rooms = $true; limit = 1 })
+        $page = Get-Json (Invoke-Mcp "list_strings" @{ limit = 2; offset = 1 })
+        $all.total -gt 0 -and $all.count -eq 1 -and $all.truncated -and $page.offset -eq 1 -and $page.count -eq 2
+    }
 
+    # ---- Text measurement ----
+    Write-Host "Text" -ForegroundColor Cyan
+    Check "measure_text measures and wraps a line in font 0" {
+        $one = Get-Json (Invoke-Mcp "measure_text" @{ font = "0"; text = "Hello" })
+        $two = Get-Json (Invoke-Mcp "measure_text" @{ font = "0"; text = "Hello[Hello" })
+        $hh = Get-Json (Invoke-Mcp "measure_text" @{ font = "0"; text = "Hello Hello" })
+        # The engine wraps at maxWidth - 1, so maxWidth = width + 1 is the tightest fit for "Hello Hello".
+        $wrap = Get-Json (Invoke-Mcp "measure_text" @{ font = "0"; text = "Hello Hello Hello"; maxWidth = $hh.width + 1 })
+        $one.width -gt 0 -and $one.lineCount -eq 1 -and $one.fontHeight -gt 0 -and
+            $two.lineCount -eq 2 -and $two.lines[1].width -eq $one.width -and $two.height -eq $one.lineSpacing + $one.height -and
+            $wrap.lineCount -eq 2 -and $wrap.lines[0].text -eq "Hello Hello" -and $wrap.lines[1].text -eq "Hello" -and $wrap.width -eq $hh.width
+    }
+
+    # ---- GUI controls ----
+    Write-Host "GUI controls" -ForegroundColor Cyan
+    Check "create_gui_control adds a button to a template GUI and list_gui_controls shows it" {
+        $guis = (Get-Json (Invoke-Mcp "list_entities" @{ type = "gui" })).entities
+        foreach ($g in $guis) {
+            $l = Get-Json (Invoke-Mcp "list_gui_controls" @{ gui = $g.name })
+            if ($l.guiType -eq "NormalGUI") { $script:smokeGui = $l; break }
+        }
+        $c = Get-Json (Invoke-Mcp "create_gui_control" @{ gui = $script:smokeGui.gui; type = "button"; x = 4; y = 4; properties = @{ Name = "btnSmoke" } })
+        $script:smokeCtrl = $c
+        $l = Get-Json (Invoke-Mcp "list_gui_controls" @{ gui = $script:smokeGui.gui })
+        $c.controlName -eq "btnSmoke" -and $c.controlId -eq $script:smokeGui.count -and
+            ($l.controls | Where-Object { $_.name -eq "btnSmoke" -and $_.type -eq "Button" -and $_.width -eq 40 })
+    }
+    Check "set_properties and get_properties work on a guicontrol" {
+        Invoke-Mcp "set_properties" @{ type = "guicontrol"; id = "$($script:smokeGui.gui):btnSmoke"; properties = @{ Text = "Smoke!" } } | Out-Null
+        $p = Get-Json (Invoke-Mcp "get_properties" @{ type = "guicontrol"; id = $script:smokeCtrl.id })
+        ($p.properties | Where-Object { $_.name -eq "Text" }).value -eq "Smoke!" -and $p.name -eq "$($script:smokeGui.gui):btnSmoke"
+    }
+    Check "set_event guicontrol and gui add OnClick stubs to GlobalScript and compile" {
+        $e = Get-Json (Invoke-Mcp "set_event" @{ type = "guicontrol"; id = "$($script:smokeGui.gui):btnSmoke"; event = "OnClick" })
+        $g = Get-Json (Invoke-Mcp "set_event" @{ type = "gui"; id = $script:smokeGui.gui; event = "Click"; function = "SmokeGui_OnClick" })
+        $text = (Get-Json (Invoke-Mcp "read_script" @{ name = "GlobalScript" })).text
+        $c = Get-Json (Invoke-Mcp "compile")
+        $e.function -eq "btnSmoke_OnClick" -and $e.parameters -eq "GUIControl *control, MouseButton button" -and
+            $text -match "function btnSmoke_OnClick\(GUIControl \*control, MouseButton button\)" -and
+            $text -match "function SmokeGui_OnClick\(GUI \*theGui, MouseButton button\)" -and $c.ok
+    }
+    Check "delete_gui_control removes the button" {
+        $d = Get-Json (Invoke-Mcp "delete_gui_control" @{ gui = $script:smokeGui.gui; control = "btnSmoke" })
+        $l = Get-Json (Invoke-Mcp "list_gui_controls" @{ gui = $script:smokeGui.gui })
+        $d.deleted -and -not ($l.controls | Where-Object { $_.name -eq "btnSmoke" }) -and $l.count -eq $script:smokeGui.count
+    }
     # ---- Assets ----
     Write-Host "Assets" -ForegroundColor Cyan
     $newSprite = $null
@@ -218,6 +325,49 @@ try {
         $r = Get-Json (Invoke-Mcp "import_sprite" @{ base64 = $png4 })
         $script:newSprite = $r.number
         Has-Image (Invoke-Mcp "get_sprite" @{ number = $script:newSprite })
+    }
+    Check "create_sprite_folder, import_sprite into it, list_sprites shows it there" {
+        $folder = (Get-Json (Invoke-Mcp "create_sprite_folder" @{ name = "SmokeFolder" })).name
+        $again = (Get-Json (Invoke-Mcp "create_sprite_folder" @{ name = "SmokeFolder"; parent = $folder })).name
+        $n = (Get-Json (Invoke-Mcp "import_sprite" @{ base64 = $png4; folder = $folder })).number
+        $tree = Get-Json (Invoke-Mcp "list_sprites" @{ folder = $folder })
+        $flat = Get-Json (Invoke-Mcp "list_sprites" @{ flat = $true })
+        $root = Get-Json (Invoke-Mcp "list_sprites")
+        $tree.name -eq $folder -and $again -eq "${folder}1" -and ($tree.sprites | Where-Object { $_.number -eq $n -and $_.width -eq 4 }) -and
+            $tree.folders[0].name -eq $again -and ($flat.sprites.number -contains $n) -and
+            ($root.folders.name -contains $folder) -and -not ($root.sprites.number -contains $n)
+    }
+    $newFont = $null
+    function Get-FontProps { param($Id) $h = @{}; (Get-Json (Invoke-Mcp "get_properties" @{ type = "font"; id = $Id })).properties | ForEach-Object { $h[$_.name] = $_.value }; $h }
+    Check "create_entity font copies font 0 into a new slot and its agsfnt file" {
+        $before = (Get-Json (Invoke-Mcp "list_entities" @{ type = "font" })).count
+        $r = Get-Json (Invoke-Mcp "create_entity" @{ type = "font"; properties = @{ CopyFrom = 0; LineSpacing = 3 } })
+        $script:newFont = [int]$r.id
+        $after = (Get-Json (Invoke-Mcp "list_entities" @{ type = "font" })).count
+        $p = Get-FontProps $script:newFont
+        $after -eq $before + 1 -and $script:newFont -eq $before -and $r.applied -contains "LineSpacing" -and -not $r.ignored -and
+            (Test-Path (Join-Path $Folder "agsfnt$($script:newFont).wfn")) -and $p.ProjectFilename -eq "agsfnt$($script:newFont).wfn" -and $p.Height -gt 0
+    }
+    Check "import_font puts a TTF and then a WFN over the slot and refuses other files" {
+        $n = $script:newFont
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) "ags-mcp-smoke-font"
+        New-Item -ItemType Directory -Force $tmp | Out-Null
+        $wfnCopy = Join-Path $tmp "smoke.wfn"
+        Copy-Item (Join-Path $Folder "agsfnt0.wfn") $wfnCopy -Force
+        $bad = $false
+        try { Invoke-Mcp "import_font" @{ id = $n; path = (Join-Path $tmp "smoke.otf") } | Out-Null } catch { $bad = $_.Exception.Message -match "\.ttf and \.wfn" }
+        $ttfOk = $true
+        $ttf = Join-Path $env:WINDIR "Fonts\arial.ttf"
+        if (Test-Path $ttf) {
+            $t = Get-Json (Invoke-Mcp "import_font" @{ id = $n; path = $ttf; height = 14 })
+            $ttfOk = $t.projectFile -eq "agsfnt$n.ttf" -and $t.pointSize -gt 0 -and $t.height -gt 0 -and
+                (Test-Path (Join-Path $Folder "agsfnt$n.ttf")) -and -not (Test-Path (Join-Path $Folder "agsfnt$n.wfn"))
+        } else { Write-Host "    (no $ttf; TTF import not exercised)" -ForegroundColor DarkGray }
+        $w = Get-Json (Invoke-Mcp "import_font" @{ id = $n; path = $wfnCopy })
+        $p = Get-FontProps $n
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        $bad -and $ttfOk -and $w.projectFile -eq "agsfnt$n.wfn" -and $w.pointSize -eq 0 -and $w.height -gt 0 -and
+            $p.ProjectFilename -eq "agsfnt$n.wfn" -and $p.SourceFilename -eq $wfnCopy -and -not (Test-Path (Join-Path $Folder "agsfnt$n.ttf"))
     }
     Check "create_view accepts the schema form ({frames:[{sprite, delay}]})" {
         $loops = @(@{ frames = @(@{ sprite = $script:newSprite; delay = 4 }, @{ sprite = $script:newSprite; flipped = $true }) })
@@ -301,18 +451,57 @@ try {
         $r -ne $null
     }
 
+    # Hooks for the run checks: log every key and text character, and a function that quits the game.
+    Check "GlobalScript gets key/text logging and MCP_Quit, and compiles" {
+        $t = (Get-Json (Invoke-Mcp "read_script" @{ name = "GlobalScript" })).text
+        $hooked = [regex]::Replace($t, '(function on_key_press\([^)]*\)\s*\{)', "`$1`r`n  System.Log(eLogInfo, `"MCPKEY %d`", keycode);", 1)
+        $hooked += "`r`nfunction on_text_input(int ch)`r`n{`r`n  System.Log(eLogInfo, `"MCPTXT %d`", ch);`r`n}`r`n" +
+                   "`r`nfunction MCP_Quit()`r`n{`r`n  QuitGame(0);`r`n}`r`n" +
+                   "`r`nfunction MCP_Room(int n)`r`n{`r`n  player.ChangeRoom(n);`r`n}`r`n" +
+                   "`r`nfunction MCP_HidePopups()`r`n{`r`n  for (int i = 0; i < Game.GUICount; i++)`r`n  {`r`n    if (gui[i].PopupStyle == eGUIPopupModal) gui[i].Visible = false;`r`n  }`r`n}`r`n"
+        Invoke-Mcp "write_script" @{ name = "GlobalScript"; text = $hooked } | Out-Null
+        $c = Get-Json (Invoke-Mcp "compile")
+        $hooked -ne $t -and $c.ok -eq $true
+    }
+    # Log lines since the given 0-based line.
+    function Get-GameLogSince { param([int]$Since) Get-Json (Invoke-Mcp "get_game_log" @{ sinceLine = $Since; limit = 5000 }) }
+
     # ---- Build ----
     Write-Host "Build" -ForegroundColor Cyan
     Check "build_game succeeds" { (Get-Json (Invoke-Mcp "build_game" @{} 300)).ok -eq $true }
     Check "the build kept the imported clip's AudioCache copy" { Test-Path (Join-Path $Folder $script:beep.cacheFile) }
+    $windowsDir = Join-Path $Folder "Compiled\Windows"
+    Check "build_game mode=release drops the plugin and Debug mode" {
+        $b = Get-Json (Invoke-Mcp "build_game" @{ mode = "release" } 300)
+        $info = Get-Json (Invoke-Mcp "project_info")
+        $b.ok -eq $true -and -not (Test-Path (Join-Path $windowsDir "agsmcp.dll")) -and
+            $info.debugMode -eq $false -and @($info.plugins).Count -eq 0 -and $info.enginePlugin.enabled -eq $false
+    }
+    Check "build_game mode=debug restores Debug mode and the plugin" {
+        $b = Get-Json (Invoke-Mcp "build_game" @{ mode = "debug" } 300)
+        $info = Get-Json (Invoke-Mcp "project_info")
+        $b.ok -eq $true -and (Test-Path (Join-Path $windowsDir "agsmcp.dll")) -and
+            $info.debugMode -eq $true -and @($info.plugins) -contains "agsmcp.dll" -and $info.enginePlugin.enabled -eq $true
+    }
 
     # ---- Run + player simulation ----
     Write-Host "Run and player simulation" -ForegroundColor Cyan
+    Check "runtime_disable_plugin disables agsmcp" {
+        $d = Get-Json (Invoke-Mcp "runtime_disable_plugin")
+        $info = Get-Json (Invoke-Mcp "project_info")
+        $d.enabled -eq $false -and $info.enginePlugin.enabled -eq $false -and -not (@($info.plugins) -contains "agsmcp.dll")
+    }
     Check "runtime_enable_plugin enables agsmcp" { (Get-Json (Invoke-Mcp "runtime_enable_plugin")).enabled -eq $true }
     Check "save_project persists" { (Get-Text (Invoke-Mcp "save_project")) -match "saved" }
     Check "run_game launches with the engine plugin" {
         $r = Get-Json (Invoke-Mcp "run_game" @{ startRoom = 1 } 300)
+        $script:firstPid = $r.pid
         $r.launched -eq $true
+    }
+    Check "run_game again while the game runs relaunches cleanly" {
+        $r = Get-Json (Invoke-Mcp "run_game" @{ startRoom = 1 } 300)
+        $s = Get-Json (Invoke-Mcp "game_status")
+        $r.launched -eq $true -and $r.pid -ne $script:firstPid -and $s.running -eq $true -and $s.pid -eq $r.pid
     }
     Start-Sleep -Seconds 4
     Check "game_state reports room 1 and the player" {
@@ -327,7 +516,190 @@ try {
         $c.queued -eq $true -and $w.met -eq $true
     }
     Check "game_screenshot returns a PNG" { Has-Image (Invoke-Mcp "game_screenshot") }
+    Check "game_screenshot outPath writes the PNG" {
+        $shot = Join-Path $Folder "out\shot.png"
+        $j = Get-Json (Invoke-Mcp "game_screenshot" @{ outPath = $shot })
+        (Get-Item $shot).Length -gt 0 -and $j.width -gt 0
+    }
+    Check "game_screenshot burst of 5 frames every 2 writes 5 PNGs and frames.json" {
+        $dir = Join-Path $Folder "out\burst"
+        $b = Get-Json (Invoke-Mcp "game_screenshot" @{ outPath = $dir; frames = 5; everyN = 2 } 120)
+        $pngs = @(Get-ChildItem $dir -Filter "frame-*.png")
+        $meta = Get-Content (Join-Path $dir "frames.json") -Raw | ConvertFrom-Json
+        $ms = @($meta.frames | ForEach-Object { $_.ms })
+        $ordered = ($ms -join ",") -eq (($ms | Sort-Object) -join ",")
+        Write-Host ("    {0} frames over {1} ms: {2}" -f $b.count, $b.elapsedMs, ($ms -join ",")) -ForegroundColor DarkGray
+        $b.count -eq 5 -and $pngs.Count -eq 5 -and @($meta.frames).Count -eq 5 -and $ordered -and $ms[4] -gt 0 -and
+            @(Get-ChildItem (Join-Path $env:TEMP "ags-mcp-run") -Recurse -Filter "agsmcp*.bmp" -ErrorAction SilentlyContinue).Count -eq 0
+    }
+    Check "game_screenshot refuses a burst without outPath" {
+        try { Invoke-Mcp "game_screenshot" @{ frames = 3 } | Out-Null; $false } catch { $_.Exception.Message -match "outPath" }
+    }
+    Check "game_key Up and F7 reach on_key_press as 372 and 365 (window-routed)" {
+        $since = (Get-GameLogSince 0).nextLine
+        $up = Get-Json (Invoke-Mcp "game_key" @{ key = "Up" })
+        $f7 = Get-Json (Invoke-Mcp "game_key" @{ key = "F7" })
+        Start-Sleep -Milliseconds 800
+        $lines = (Get-GameLogSince $since).lines
+        $up.via -eq "window" -and $f7.via -eq "window" -and
+            ($lines -match "MCPKEY 372") -and ($lines -match "MCPKEY 365") -and -not ($lines -match "MCPKEY 56")
+    }
+    Check "game_wait_until logLine finds the MCPKEY line a game_key writes" {
+        $since = (Get-GameLogSince 0).nextLine
+        Invoke-Mcp "game_key" @{ key = "B" } | Out-Null
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "MCPKEY 66"; sinceLine = $since; timeoutMs = 5000 })
+        Write-Host ("    line {0} after {1} ms: {2}" -f $w.lineIndex, $w.elapsedMs, $w.line) -ForegroundColor DarkGray
+        $w.met -eq $true -and $w.line -match "MCPKEY 66" -and $w.lineIndex -ge $since -and $w.nextLine -eq $w.lineIndex + 1
+    }
+    Check "game_wait_until logLine times out on a line that never comes" {
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "NEVER_WRITTEN_\d+"; timeoutMs = 600 })
+        $w.met -eq $false -and $w.elapsedMs -ge 600 -and $w.lineIndex -eq $null
+    }
+    Check "game_type sends text input that reaches on_text_input" {
+        $since = (Get-GameLogSince 0).nextLine
+        $t = Get-Json (Invoke-Mcp "game_type" @{ text = "Hi" })
+        Start-Sleep -Milliseconds 800
+        $lines = (Get-GameLogSince $since).lines
+        $t.units -eq 2 -and ($lines -match "MCPTXT 72") -and ($lines -match "MCPTXT 105")
+    }
+    Check "game_text_extent measures 'Hi' in font 0 as measure_text does" {
+        $e = Get-Json (Invoke-Mcp "game_text_extent" @{ font = 0; text = "Hi" })
+        $m = Get-Json (Invoke-Mcp "measure_text" @{ font = 0; text = "Hi" })
+        Write-Host ("    engine {0}x{1}, measure_text width {2}" -f $e.width, $e.height, $m.width) -ForegroundColor DarkGray
+        $e.width -gt 0 -and $e.height -gt 0 -and $e.width -eq $m.width
+    }
+    # The template's F7 opens its restore dialog, a modal popup that pauses the game and covers the room.
+    Check "game_call_function MCP_HidePopups closes the dialog F7 opened and unpauses the game" {
+        Invoke-Mcp "game_call_function" @{ name = "MCP_HidePopups" } | Out-Null
+        Start-Sleep -Milliseconds 500
+        (Get-Json (Invoke-Mcp "game_state")).paused -eq 0
+    }
+    Check "game_call_function MCP_Room(2) takes the player to room 2" {
+        Invoke-Mcp "game_call_function" @{ name = "MCP_Room"; args = @(2) } | Out-Null
+        (Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "room"; room = 2; timeoutMs = 15000 })).met -eq $true
+    }
+    Check "game_call_function roomScript=true runs a room2.asc function" {
+        $since = (Get-GameLogSince 0).nextLine
+        $r = Get-Json (Invoke-Mcp "game_call_function" @{ name = "MCP_RoomPing"; roomScript = $true })
+        Start-Sleep -Milliseconds 800
+        $lines = (Get-GameLogSince $since).lines
+        $r.queued -eq $true -and $r.globalScript -eq $false -and $r.room -eq 2 -and ($lines -match "MCPROOM")
+    }
+    Check "game_call_function roomScript=true refuses a GlobalScript-only function" {
+        try { Invoke-Mcp "game_call_function" @{ name = "MCP_Quit"; roomScript = $true } | Out-Null; $false }
+        catch { $_.Exception.Message -match "room2.asc defines no function" }
+    }
+    Check "game_run_interaction hotspot:hSmoke mode=1 runs its Look event and the game gets ready" {
+        $since = (Get-GameLogSince 0).nextLine
+        $r = Get-Json (Invoke-Mcp "game_run_interaction" @{ target = "hotspot:hSmoke"; mode = 1 } 120)
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "ready"; timeoutMs = 20000 })
+        Write-Host ("    point {0},{1} after {2} tried" -f $r.point.x, $r.point.y, $r.tried) -ForegroundColor DarkGray
+        $r.hoverName -eq "Smoke" -and $r.queued -eq $true -and $w.met -eq $true -and ((Get-GameLogSince $since).lines -match "MCPLOOK")
+    }
+    Check "game_run_interaction object:oSmoke and character:cEgo (Walk) find their sprites" {
+        $o = Get-Json (Invoke-Mcp "game_run_interaction" @{ target = "object:oSmoke"; mode = 0 } 120)
+        $w1 = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "ready"; timeoutMs = 20000 })
+        $c = Get-Json (Invoke-Mcp "game_run_interaction" @{ target = "character:cEgo"; mode = 0 } 120)
+        $w2 = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "ready"; timeoutMs = 20000 })
+        Write-Host ("    object at {0},{1} ({2} tried), character at {3},{4} ({5} tried)" -f $o.point.x, $o.point.y, $o.tried, $c.point.x, $c.point.y, $c.tried) -ForegroundColor DarkGray
+        $o.hoverName -eq "Smoke pot" -and $o.queued -and $w1.met -and $c.hoverName -eq $w1.state.player.name -and $c.queued -and $w2.met
+    }
+    Check "game_run_interaction refuses a missing hotspot" {
+        try { Invoke-Mcp "game_run_interaction" @{ target = "hotspot:hNoSuch"; mode = 1 } 120 | Out-Null; $false }
+        catch { $_.Exception.Message -match "no hotspot 'hNoSuch'" }
+    }
     Check "stop_game stops the game" { (Get-Json (Invoke-Mcp "stop_game")).stopped -eq $true }
+    Check "a game that calls QuitGame exits within 3 s while the bridge is connected" {
+        $r = Get-Json (Invoke-Mcp "run_game" @{ startRoom = 1 } 300)
+        Start-Sleep -Seconds 4
+        Invoke-Mcp "game_state" | Out-Null # the bridge now holds an open connection
+        Invoke-Mcp "game_call_function" @{ name = "MCP_Quit" } | Out-Null
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        do { Start-Sleep -Milliseconds 200; $s = Get-Json (Invoke-Mcp "game_status") } while ($s.running -and $sw.ElapsedMilliseconds -lt 10000)
+        $sw.Stop()
+        Write-Host ("    exited after {0} ms" -f $sw.ElapsedMilliseconds) -ForegroundColor DarkGray
+        $r.launched -and -not $s.running -and $sw.ElapsedMilliseconds -lt 3000
+    }
+
+    # ---- Desktop driver: a release build, no engine plugin ----
+    Write-Host "Desktop driver" -ForegroundColor Cyan
+    Check "build_game mode=release, then desktop_run starts it in room 1 with a window" {
+        $b = Get-Json (Invoke-Mcp "build_game" @{ mode = "release" } 300)
+        $script:desk = Get-Json (Invoke-Mcp "desktop_run" @{ exe = $b.exe; startRoom = 1 } 90)
+        Write-Host ("    window after {0} ms, client {1}x{2}, scale {3}" -f $desk.windowMs, $desk.window.client.width, $desk.window.client.height, $desk.window.scale) -ForegroundColor DarkGray
+        $b.ok -and $desk.launched -and $desk.window.hwnd -ne 0 -and $desk.renderer -eq "software"
+    }
+    Start-Sleep -Seconds 3
+    Check "desktop_status reports the game running" {
+        $s = Get-Json (Invoke-Mcp "desktop_status")
+        $s.running -eq $true -and $s.window.client.width -ge $s.gameWidth
+    }
+    Check "desktop_screenshot writes a PNG at the game's native size" {
+        $shot = Join-Path $Folder "out\desktop.png"
+        $j = Get-Json (Invoke-Mcp "desktop_screenshot" @{ outPath = $shot })
+        Add-Type -AssemblyName System.Drawing
+        $img = [System.Drawing.Image]::FromFile($shot); $w = $img.Width; $h = $img.Height
+        # Not all one colour: the capture read the game, not a blank surface.
+        $bmp = New-Object System.Drawing.Bitmap $img; $img.Dispose()
+        $colours = @{}; for ($y = 5; $y -lt $h; $y += 20) { for ($x = 5; $x -lt $w; $x += 20) { $colours[$bmp.GetPixel($x, $y).ToArgb()] = 1 } }; $bmp.Dispose()
+        Write-Host ("    {0}x{1} via {2}, {3} distinct sampled colours" -f $w, $h, ($j.note -replace '.*\((\w+)\).*', '$1'), $colours.Count) -ForegroundColor DarkGray
+        $w -eq $desk.gameWidth -and $h -eq $desk.gameHeight -and $colours.Count -gt 1
+    }
+    Check "desktop_screenshot burst of 3 every 200 ms writes frames on schedule" {
+        $dir = Join-Path $Folder "out\desktop-burst"
+        $j = Get-Json (Invoke-Mcp "desktop_screenshot" @{ outPath = $dir; frames = 3; intervalMs = 200 })
+        $ms = @($j.frames | ForEach-Object { $_.ms })
+        Write-Host ("    frames at {0} ms" -f ($ms -join ",")) -ForegroundColor DarkGray
+        $j.count -eq 3 -and @(Get-ChildItem $dir -Filter "frame-*.png").Count -eq 3 -and (Test-Path (Join-Path $dir "frames.json")) -and
+            $ms[1] -ge 200 -and $ms[2] -ge 400 -and $ms[2] -lt 1000
+    }
+    Check "get_game_log source=desktop reads the desktop game's log, and it is the default now" {
+        $d = Get-Json (Invoke-Mcp "get_game_log" @{ source = "desktop"; limit = 5000 })
+        $def = Get-Json (Invoke-Mcp "get_game_log" @{ limit = 1 })
+        $d.source -eq "desktop" -and $def.source -eq "desktop" -and $d.logPath -match "ags-mcp-desktop" -and $d.totalLines -gt 0 -and
+            -not ($d.lines -match "MCP engine bridge")
+    }
+    # Real input: room 2's hSmoke hotspot covers game pixels 100..139 x 50..89; the template starts in Walk mode and a
+    # right-click selects the next mode (Look).
+    Check "desktop_run startRoom=2, desktop_click right then left on hSmoke runs its Look event" {
+        $r = Get-Json (Invoke-Mcp "desktop_run" @{ startRoom = 2 } 90)
+        Start-Sleep -Seconds 3
+        $since = (Get-GameLogSince 0).nextLine
+        $right = Get-Json (Invoke-Mcp "desktop_click" @{ x = 105; y = 55; button = "right" })
+        Start-Sleep -Milliseconds 300
+        $left = Get-Json (Invoke-Mcp "desktop_click" @{ x = 105; y = 55 })
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "MCPLOOK"; sinceLine = $since; timeoutMs = 5000 })
+        # The Look event says a line; a right-click skips it (and only changes the mode if the line already ended).
+        Invoke-Mcp "desktop_click" @{ x = 105; y = 55; button = "right" } | Out-Null
+        Write-Host ("    clicked screen {0},{1} (took focus: {2}); MCPLOOK after {3} ms" -f $left.screen.x, $left.screen.y, $right.tookFocus, $w.elapsedMs) -ForegroundColor DarkGray
+        $r.launched -and $right.clicked -and $left.clicked -and $w.met -eq $true
+    }
+    Check "desktop_type sends text that reaches on_text_input" {
+        Start-Sleep -Milliseconds 500
+        $since = (Get-GameLogSince 0).nextLine
+        $t = Get-Json (Invoke-Mcp "desktop_type" @{ text = "Hi" })
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "MCPTXT 105"; sinceLine = $since; timeoutMs = 5000 })
+        $t.units -eq 2 -and $w.met -eq $true -and ((Get-GameLogSince $since).lines -match "MCPTXT 72")
+    }
+    Check "desktop_key Escape, then Up reaches on_key_press as 372 (an extended key, not keypad 8)" {
+        $since = (Get-GameLogSince 0).nextLine
+        $esc = Get-Json (Invoke-Mcp "desktop_key" @{ key = "Escape" })
+        $up = Get-Json (Invoke-Mcp "desktop_key" @{ key = "Up" })
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "MCPKEY 372"; sinceLine = $since; timeoutMs = 5000 })
+        Start-Sleep -Milliseconds 300
+        $lines = (Get-GameLogSince $since).lines
+        Write-Host ("    {0}" -f (($lines -match "MCPKEY") -join " | ")) -ForegroundColor DarkGray
+        $esc.pressed -and $up.extended -eq $true -and $w.met -eq $true -and ($lines -match "MCPKEY 27") -and -not ($lines -match "MCPKEY 56")
+    }
+    Check "desktop_key refuses an unknown key and desktop_click a point outside the game" {
+        $k = try { Invoke-Mcp "desktop_key" @{ key = "Banana" } | Out-Null; $false } catch { $_.Exception.Message -match "Unknown key" }
+        $c = try { Invoke-Mcp "desktop_click" @{ x = 9999; y = 0 } | Out-Null; $false } catch { $_.Exception.Message -match "outside" }
+        $k -and $c
+    }
+    Check "desktop_stop stops it" {
+        $s = Get-Json (Invoke-Mcp "desktop_stop")
+        $s.stopped -eq $true -and (Get-Json (Invoke-Mcp "desktop_status")).running -eq $false
+    }
 }
 finally {
     if ($Keep) { Write-Host "Left the smoke game open at $Folder (-Keep)." -ForegroundColor Yellow } else { Remove-SmokeGame }

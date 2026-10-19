@@ -146,4 +146,17 @@ For a plain choice inside a room interaction, use a dialog as a menu: create it,
 - If the compiler says "structure required on left side of '.'" on a chained call such as `name.Substring(0, 1).LowerCase()`, split it into one call per statement.
 - A room with two or more backgrounds cycles through them unless `room_Load` calls `SetBackgroundFrame(0)` (or the frame it should show).
 - A hotspot's `WalkToPoint` also redirects every Walk-mode click on that hotspot to the point. Give walk-to points to things the player must stand beside (furniture, doors), not to floor areas or exit strips. Whether a Look click walks there first depends on the game's settings, so turn the player with `FaceLocation` in a Look handler when it matters.
-- Colour properties (GUI `BackgroundColor`, `TextColor`, …) are AGS colour numbers, not RGB: in script use `Game.GetColorFromRGB(r, g, b)`; through `set_properties` in a 16- or 32-bit game pass the number it would return, `((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)`. A GUI with a `BackgroundImage` shows the image, and its `BackgroundColor` has no visible effect.
+- Colour properties (GUI `BackgroundColor`, `TextColor`, …) are AGS colour numbers, not RGB. A GUI with a `BackgroundImage` shows the image, and its `BackgroundColor` has no visible effect. See "Colour numbers" below.
+- Scripts are stored with CRLF line endings. The script tools and `set_dialog_script` write CRLF whatever you send, and `edit_script` matches `find` with either style, so send plain `\n`.
+- If a compile reports an error you already fixed, or the game runs old code, the script was changed on disk outside the script tools and the editor is compiling its own older copy: `read_script` and `compile` say `staleOnDisk`. `reload_script name` takes the disk version (unsaved edits in the editor are lost); otherwise the next save writes the old text back over the file.
+
+## Colour numbers
+
+In a 16- or 32-bit game a colour number is RGB565, the value `Game.GetColorFromRGB(r, g, b)` returns in script. To set a colour through `set_properties`, compute it the same way:
+
+```
+colour = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+white (255,255,255) = 65535   black = 0   red (255,0,0) = 63488   green (0,255,0) = 2016   blue (0,0,255) = 31
+```
+
+The low bits are dropped, so nearby RGB values give the same number, and reading a colour back gives the rounded value. An 8-bit game uses palette indices instead.

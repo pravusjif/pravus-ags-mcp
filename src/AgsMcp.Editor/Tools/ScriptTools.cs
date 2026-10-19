@@ -21,7 +21,9 @@ namespace AgsMcp.Editor.Tools
             yield return ReadScript(ctx);
             yield return WriteScript(ctx);
             yield return EditScript(ctx);
+            yield return ReloadScript(ctx);
             yield return CreateScriptModule(ctx);
+            yield return MoveScriptModule(ctx);
             yield return Compile(ctx);
             yield return ScriptApiLookup(ctx);
         }
@@ -62,7 +64,9 @@ namespace AgsMcp.Editor.Tools
             Title = "Read script",
             Description = "Read a script's text. 'name' is a module name (e.g. \"GlobalScript\"), a room script (\"room1\") " +
                           "or a filename (\"GlobalScript.asc\"/\".ash\", \"room1.asc\"). Reads the body (.asc) by default; set header=true for the header. " +
-                          "Optionally restrict to a 1-based inclusive line range with startLine/endLine.",
+                          "Optionally restrict to a 1-based inclusive line range with startLine/endLine. This is the editor's " +
+                          "in-memory copy, which compile and builds use; staleOnDisk=true means the file on disk was changed " +
+                          "outside the editor and differs from it (call reload_script to take the disk version).",
             InputSchema = Schema.Object()
                 .Required("name", Schema.String("Module name or script filename."))
                 .Optional("header", Schema.Boolean("Read the header (.ash) instead of the body (.asc). Default false."))
@@ -84,6 +88,7 @@ namespace AgsMcp.Editor.Tools
                     totalLines,
                     startLine = Math.Max(1, startLine),
                     endLine = endLine <= 0 ? totalLines : Math.Min(endLine, totalLines),
+                    staleOnDisk = StaleOnDisk(game, script),
                     text,
                 });
             },
@@ -142,6 +147,68 @@ namespace AgsMcp.Editor.Tools
             },
         };
 
+        private static Tool ReloadScript(ToolContext ctx) => new Tool
+        {
+            Name = "reload_script",
+            Title = "Reload script from disk",
+            Description = "Replace the editor's in-memory copy of a script with the file on disk, after the file was edited " +
+                          "outside the editor (read_script and compile report staleOnDisk=true then). Without it the editor " +
+                          "compiles, and on its next save writes back, the old text. 'name' is a module (both its header and " +
+                          "body are reloaded) or a room script (\"roomN\"). Unsaved in-memory edits to the script are discarded. " +
+                          "A room whose other changes are unsaved in the editor is refused; save_project first.",
+            InputSchema = Schema.Object()
+                .Required("name", Schema.String("Module name, room script (\"roomN\") or script filename."))
+                .Build(),
+            Annotations = ToolAnnotations.DestructiveTool,
+            Handler = args =>
+            {
+                Game game = ctx.RequireGame();
+                string name = args.String("name").Trim();
+                var scripts = new List<Script>();
+                if (TryParseRoomScript(name, out int number))
+                {
+                    UnloadedRoom room = RoomSession.Find(game, number);
+                    if (!File.Exists(Path.Combine(game.DirectoryPath, room.ScriptFileName)))
+                        throw new ToolException($"Room {number}'s script file '{room.ScriptFileName}' is missing.");
+                    Room loaded = EditorInternals.LoadedRoom(ctx.Editor);
+                    if (loaded != null && loaded.Number == number)
+                    {
+                        if (loaded.Modified)
+                            throw new ToolException($"Room {number} is loaded in the editor with unsaved changes. Save them first (save_project), then retry.");
+                        if (loaded.Script != null) scripts.Add(loaded.Script);
+                    }
+                    // Reload in place: the loaded Room and its UnloadedRoom entry share one Script object, which a
+                    // fresh LoadScript would split.
+                    if (room.Script == null && scripts.Count == 0) room.LoadScript();
+                    if (room.Script != null && !scripts.Contains(room.Script)) scripts.Add(room.Script);
+                }
+                else
+                {
+                    string module = name.EndsWith(".asc", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ash", StringComparison.OrdinalIgnoreCase)
+                        ? Path.GetFileNameWithoutExtension(name) : name;
+                    ScriptAndHeader sh = FindModule(game, module);
+                    foreach (Script s in new[] { sh.Header, sh.Script })
+                    {
+                        if (s == null) continue;
+                        if (!File.Exists(Path.Combine(game.DirectoryPath, s.FileName)))
+                            throw new ToolException($"'{s.FileName}' is missing on disk, so there is nothing to reload.");
+                        scripts.Add(s);
+                    }
+                }
+
+                var files = scripts.Select(s =>
+                {
+                    string before = s.Text;
+                    s.LoadFromDisk();
+                    s.Modified = false;
+                    ctx.Editor.RebuildAutocompleteCache(s);
+                    EditorInternals.NotifyScriptChanged(s);
+                    return new { file = s.FileName, lines = ScriptText.CountLines(s.Text), changed = !ScriptText.SameIgnoringNewlines(before, s.Text) };
+                }).ToList();
+                return ToolResult.Json(new { name, files, reloaded = true });
+            },
+        };
+
         private static Tool CreateScriptModule(ToolContext ctx) => new Tool
         {
             Name = "create_script_module",
@@ -178,6 +245,56 @@ namespace AgsMcp.Editor.Tools
             },
         };
 
+        private static Tool MoveScriptModule(ToolContext ctx) => new Tool
+        {
+            Name = "move_script_module",
+            Title = "Move script module",
+            Description = "Change a module's place in the compile order (the list_scripts order). A module sees only the " +
+                          "headers of the modules above it, so a module whose header another uses must sit above it. " +
+                          "direction=up/down moves one place; direction=index moves to 'index' (0 = first). GlobalScript cannot " +
+                          "be moved, and projects with script folders are refused (the flat order and the folder tree would " +
+                          "disagree). Returns the new order; call save_project to persist it.",
+            InputSchema = Schema.Object()
+                .Required("name", Schema.String("Module name, e.g. \"Utils\"."))
+                .Required("direction", Schema.String("Where to move it.", "up", "down", "index"))
+                .Optional("index", Schema.Integer("Target position (0-based) when direction=index."))
+                .Build(),
+            Annotations = ToolAnnotations.Mutating,
+            Handler = args =>
+            {
+                Game game = ctx.RequireGame();
+                string direction = args.String("direction");
+                if (direction == "index" && !args.Has("index")) throw new ToolException("direction=index needs 'index'.");
+                if (game.RootScriptFolder.SubFolders.Count > 0)
+                    throw new ToolException("This project has script folders; reorder its modules in the editor's project tree. " +
+                                            "move_script_module only works on projects without script folders.");
+                string name = args.String("name").Trim();
+                if (name.EndsWith(".asc", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".ash", StringComparison.OrdinalIgnoreCase))
+                    name = Path.GetFileNameWithoutExtension(name);
+                ScriptAndHeader module = FindModule(game, name);
+                if (module.Script != null && module.Script.FileName == Script.GLOBAL_SCRIPT_FILE_NAME)
+                    throw new ToolException("GlobalScript cannot be moved; move the other modules around it.");
+
+                ScriptsAndHeaders all = game.ScriptsAndHeaders;
+                int from = all.ToList().IndexOf(module);
+                int steps = ModuleOrder.Plan(all.Count, from, direction, args.Int("index", -1));
+                for (int i = 0; i < Math.Abs(steps); i++)
+                {
+                    if (steps < 0) all.MoveScriptAndHeaderUp(module);
+                    else all.MoveScriptAndHeaderDown(module);
+                }
+                if (steps != 0) game.FilesAddedOrRemoved = true;
+                return ToolResult.Json(new
+                {
+                    name = ModuleName(module),
+                    from,
+                    to = all.ToList().IndexOf(module),
+                    moved = steps != 0,
+                    order = all.Select(ModuleName).ToList(),
+                });
+            },
+        };
+
         private static Tool Compile(ToolContext ctx) => new Tool
         {
             Name = "compile",
@@ -185,7 +302,9 @@ namespace AgsMcp.Editor.Tools
             Description = "Compile the project's script modules and return any errors and warnings with file and line number. " +
                           "Pass 'name' to compile a single module, or a room script (\"roomN\", compiled with the room's hotspot " +
                           "and object names; this loads the room in the editor). Without 'name' every module is compiled, but not " +
-                          "room scripts. This checks scripts only (it does not package assets or build a runnable game).",
+                          "room scripts. This checks scripts only (it does not package assets or build a runnable game). It " +
+                          "compiles the editor's in-memory copies: 'staleOnDisk' lists the files that were changed on disk " +
+                          "outside the editor and so were not what got compiled (reload_script takes the disk version).",
             InputSchema = Schema.Object()
                 .Optional("name", Schema.String("Module name or room script (\"roomN\") to compile. Omit to compile all modules."))
                 .Build(),
@@ -201,6 +320,9 @@ namespace AgsMcp.Editor.Tools
                     if (room.Script == null) room.LoadScript();
                     CompileMessages roomMessages = EditorInternals.CompileRoomScript(room);
                     int roomErrors = roomMessages.Count(m => m is CompileError);
+                    // A room script also sees every module header.
+                    var roomInputs = new List<Script> { room.Script };
+                    roomInputs.AddRange(game.ScriptsAndHeaders.Where(sh => sh.Header != null).Select(sh => sh.Header));
                     return ToolResult.Json(new
                     {
                         ok = roomErrors == 0,
@@ -208,6 +330,7 @@ namespace AgsMcp.Editor.Tools
                         warnings = roomMessages.Count - roomErrors,
                         modulesCompiled = 1,
                         messages = RoomSession.Describe(roomMessages),
+                        staleOnDisk = StaleFiles(game, roomInputs),
                     });
                 }
                 if (args.Has("name"))
@@ -235,7 +358,9 @@ namespace AgsMcp.Editor.Tools
                         messages.Add(new { severity, script = m.ScriptName, line = m.LineNumber, message = m.Message });
                     }
                 }
-                return ToolResult.Json(new { ok = errors == 0, errors, warnings, modulesCompiled = bodies.Count, messages });
+                var inputs = new List<Script>(bodies);
+                inputs.AddRange(game.ScriptsAndHeaders.Where(sh => sh.Header != null).Select(sh => sh.Header));
+                return ToolResult.Json(new { ok = errors == 0, errors, warnings, modulesCompiled = bodies.Count, messages, staleOnDisk = StaleFiles(game, inputs) });
             },
         };
 
@@ -326,7 +451,7 @@ namespace AgsMcp.Editor.Tools
         }
 
         /// <summary>A room script's current text, without loading it into the project if it is not already.</summary>
-        private static string RoomScriptText(Game game, UnloadedRoom room) =>
+        internal static string RoomScriptText(Game game, UnloadedRoom room) =>
             room.Script != null ? room.Script.Text : File.ReadAllText(Path.Combine(game.DirectoryPath, room.ScriptFileName));
 
         private static Script Resolve(Game game, string name, bool wantHeader)
@@ -341,15 +466,10 @@ namespace AgsMcp.Editor.Tools
             bool header = wantHeader || headerByExt;
             string module = (headerByExt || bodyByExt) ? Path.GetFileNameWithoutExtension(name) : name;
 
-            foreach (ScriptAndHeader sh in game.ScriptsAndHeaders)
-            {
-                if (!string.Equals(ModuleName(sh), module, StringComparison.OrdinalIgnoreCase)) continue;
-                Script s = header ? sh.Header : sh.Script;
-                if (s == null) throw new ToolException($"Module '{module}' has no {(header ? "header (.ash)" : "body (.asc)")}.");
-                return s;
-            }
-            string available = string.Join(", ", game.ScriptsAndHeaders.Select(ModuleName));
-            throw new ToolException($"No script module named '{module}'. Available modules: {available}; room scripts are named roomN.");
+            ScriptAndHeader sh = FindModule(game, module);
+            Script s = header ? sh.Header : sh.Script;
+            if (s == null) throw new ToolException($"Module '{module}' has no {(header ? "header (.ash)" : "body (.asc)")}.");
+            return s;
         }
 
         /// <summary>
@@ -396,7 +516,11 @@ namespace AgsMcp.Editor.Tools
             }
         }
 
-        private static void Save(ToolContext ctx, Script script, string text)
+        /// <summary>
+        /// Replaces a script's text and writes it to disk: the one save path for every tool that changes a
+        /// script (write_script, edit_script, set_event).
+        /// </summary>
+        internal static void Save(ToolContext ctx, Script script, string text)
         {
             // The editor writes CRLF (its stub generator appends CRLF lines); keep files uniform so
             // later multi-line edit_script matches never straddle two newline styles.
@@ -405,6 +529,28 @@ namespace AgsMcp.Editor.Tools
             script.SaveToDisk();
             ctx.Editor.RebuildAutocompleteCache(script);
             EditorInternals.NotifyScriptChanged(script);
+        }
+
+        /// <summary>
+        /// Whether the script's file was changed outside the editor: its text differs from the in-memory copy
+        /// (which is what the editor compiles and saves) by more than newlines. Null when the file is missing.
+        /// </summary>
+        private static bool? StaleOnDisk(Game game, Script script)
+        {
+            string path = Path.Combine(game.DirectoryPath, script.FileName);
+            if (!File.Exists(path)) return null;
+            return !ScriptText.SameIgnoringNewlines(File.ReadAllText(path, Script.TextEncoding), script.Text);
+        }
+
+        private static List<string> StaleFiles(Game game, IEnumerable<Script> scripts) =>
+            scripts.Distinct().Where(s => StaleOnDisk(game, s) == true).Select(s => s.FileName).ToList();
+
+        private static ScriptAndHeader FindModule(Game game, string module)
+        {
+            foreach (ScriptAndHeader sh in game.ScriptsAndHeaders)
+                if (string.Equals(ModuleName(sh), module, StringComparison.OrdinalIgnoreCase)) return sh;
+            string available = string.Join(", ", game.ScriptsAndHeaders.Select(ModuleName));
+            throw new ToolException($"No script module named '{module}'. Available modules: {available}; room scripts are named roomN.");
         }
 
         private sealed class ApiEntry

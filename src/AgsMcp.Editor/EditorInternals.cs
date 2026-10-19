@@ -291,6 +291,46 @@ namespace AgsMcp.Editor
         public static string GetSpriteUsageReport(int spriteNumber, Game game) =>
             AGS.Editor.Utils.SpriteTools.GetSpriteUsageReport(spriteNumber, game);
 
+        // --- Fonts ---
+        // The editor's native font slots mirror Game.Fonts; FontsComponent keeps them in step through these
+        // NativeProxy calls. Font files are agsfnt<ID>.wfn|ttf in the game folder (the editor's working directory).
+
+        public static void OnFontAdded(Game game, int id) =>
+            InvokeNative("OnFontAdded", new[] { typeof(Game), typeof(int) }, new object[] { game, id });
+
+        /// <summary>Pushes a font's settings to its native slot and refreshes Font.Height/FamilyName from it.</summary>
+        public static void OnFontUpdated(Game game, int id, bool forceUpdate) =>
+            InvokeNative("OnFontUpdated", new[] { typeof(Game), typeof(int), typeof(bool) }, new object[] { game, id, forceUpdate });
+
+        /// <summary>Reloads a font slot from its file on disk; throws AGSEditorException for a bad file.</summary>
+        public static void ReloadFont(int id) =>
+            InvokeNative("ReloadFont", new[] { typeof(int) }, new object[] { id });
+
+        /// <summary>
+        /// The TTF point size whose pixel height is closest to <paramref name="pixelHeight"/>; throws for a bad file.
+        /// <paramref name="fileName"/> must be relative to the game folder (the native asset manager's search path).
+        /// </summary>
+        public static int FindTTFSizeForHeight(string fileName, int pixelHeight) =>
+            (int)InvokeNative("FindTTFSizeForHeight", new[] { typeof(string), typeof(int) }, new object[] { fileName, pixelHeight });
+
+        /// <summary>Rebuilds the Fonts node of the project tree (FontsComponent's private RePopulateTreeView). Best-effort.</summary>
+        public static void RefreshFontsTree()
+        {
+            try
+            {
+                foreach (IEditorComponent comp in AGS.Editor.ComponentController.Instance.Components)
+                {
+                    if (comp.ComponentID != "Fonts") continue;
+                    InvokePrivate(comp, "RePopulateTreeView", Type.EmptyTypes, new object[0]);
+                    return;
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Write("Could not refresh the fonts tree: " + e.Message);
+            }
+        }
+
         // --- Audio ---
         // AudioClip model edits are plain AGS.Types; only the tree refresh, the script header and the build-output
         // paths are editor knowledge. The audio component (internal AudioComponent, ID "AudioNew") implements the
@@ -378,25 +418,43 @@ namespace AgsMcp.Editor
         /// <summary>The exe base name (Settings.GameFileName, or the game folder name).</summary>
         public static string BaseGameFileName => AGS.Editor.AGSEditor.Instance.BaseGameFileName;
 
+        /// <summary>The standalone Windows build folder: &lt;game&gt;\Compiled\Windows.</summary>
+        public static string WindowsBuildDirectory() =>
+            Path.Combine(GameDirectory, AGS.Editor.AGSEditor.OUTPUT_DIRECTORY, AGS.Editor.BuildTargetWindows.WINDOWS_DIRECTORY);
+
         /// <summary>Full path to the standalone Windows build: &lt;game&gt;\Compiled\Windows\&lt;name&gt;.exe.</summary>
-        public static string WindowsBuildExePath() =>
-            Path.Combine(GameDirectory, AGS.Editor.AGSEditor.OUTPUT_DIRECTORY, "Windows", BaseGameFileName + ".exe");
+        public static string WindowsBuildExePath() => Path.Combine(WindowsBuildDirectory(), BaseGameFileName + ".exe");
+
+        /// <summary>The main game data file every build target starts from: &lt;game&gt;\Compiled\Data\&lt;name&gt;.ags.</summary>
+        public static string DataFilePath() =>
+            Path.Combine(GameDirectory, AGS.Editor.AGSEditor.OUTPUT_DIRECTORY, AGS.Editor.AGSEditor.DATA_OUTPUT_DIRECTORY, BaseGameFileName + ".ags");
 
         /// <summary>
-        /// Runs a full game build on the editor's main-window thread with the compile message box suppressed,
-        /// and returns the compile messages. CompileGame touches the output panel and can pop a modal error
+        /// Runs a full game build the way the editor's Build EXE command does (BuildCommandsComponent.CompileGame):
+        /// a rebuild is forced when Settings.DebugMode differs from the last build's configuration
+        /// (AGSEditor.NeedsRebuildForDebugMode, which also records the new one), the game is saved first, and the
+        /// user data file is saved after the build. CompileGame touches the output panel and can pop a modal error
         /// dialog (ReportErrorsIfAppropriate); the panel controls belong to the main-window thread and the modal
         /// dialog would block an unattended session, so we marshal onto that thread and set MessageBoxOnCompile
         /// to Never for the duration (mirroring the editor's own headless/new-game build path), then restore it.
+        /// Throws a ToolException if the save fails, as the editor then does not build either.
         /// </summary>
         public static CompileMessages CompileGameFull(bool forceRebuild)
         {
             return RunOnMainForm(() =>
             {
                 var editor = AGS.Editor.AGSEditor.Instance;
+                forceRebuild = editor.NeedsRebuildForDebugMode() || forceRebuild;
+                if (!editor.SaveGameFiles())
+                    throw new Mcp.ToolException("Saving the game before the build failed, so nothing was built. Check the editor for an error message.");
                 AGS.Editor.Preferences.MessageBoxOnCompile old = editor.Settings.MessageBoxOnCompile;
                 editor.Settings.MessageBoxOnCompile = AGS.Editor.Preferences.MessageBoxOnCompile.Never;
-                try { return editor.CompileGame(forceRebuild, false); }
+                try
+                {
+                    CompileMessages messages = editor.CompileGame(forceRebuild, false);
+                    editor.SaveUserDataFile(); // the build may have amended the workspace state
+                    return messages;
+                }
                 finally { editor.Settings.MessageBoxOnCompile = old; }
             });
         }
@@ -425,22 +483,10 @@ namespace AgsMcp.Editor
             return RunOnMainForm(() =>
             {
                 var result = new EnablePluginResult();
-
-                object pluginsComp = null;
-                foreach (IEditorComponent comp in editor.Components)
-                {
-                    if (comp.ComponentID == "Plugins") { pluginsComp = comp; break; }
-                }
-                if (pluginsComp == null)
-                    throw new InvalidOperationException("The editor's Plugins component was not found.");
-
-                FieldInfo field = pluginsComp.GetType().GetField("_plugins", BindingFlags.Instance | BindingFlags.NonPublic);
-                var list = field?.GetValue(pluginsComp) as System.Collections.IEnumerable;
-                if (list == null)
-                    throw new InvalidOperationException("Could not read the editor's native-plugin list.");
+                object pluginsComp = PluginsComponent(editor);
 
                 AGS.Editor.NativePlugin target = null;
-                foreach (AGS.Editor.NativePlugin np in list)
+                foreach (AGS.Editor.NativePlugin np in NativePlugins(pluginsComp))
                 {
                     result.Available.Add(np.FileName);
                     if (string.Equals(np.FileName, fileName, StringComparison.OrdinalIgnoreCase))
@@ -455,14 +501,101 @@ namespace AgsMcp.Editor
                 if (!target.Enabled)
                     target.Enabled = true; // StartPlugin() -> our AGS_EditorStartup (returns 0)
 
-                bool inGame = false;
-                foreach (Plugin p in game.Plugins)
-                    if (string.Equals(p.FileName, fileName, StringComparison.OrdinalIgnoreCase)) { inGame = true; break; }
-                if (!inGame)
+                if (!IsInGamePlugins(game, fileName))
                     game.Plugins.Add(new Plugin(target.FileName, new byte[0]));
 
+                RepopulatePluginsTree(pluginsComp);
                 return result;
             });
+        }
+
+        /// <summary>Whether a native engine plugin is installed in the editor folder and enabled for the game.</summary>
+        public sealed class EnginePluginState
+        {
+            public bool Available;
+            public bool Enabled;
+        }
+
+        /// <summary>
+        /// Reports a native engine plugin's state. Enabled is the editor's NativePlugin.Enabled (what the next save
+        /// writes to Game.Plugins); for a plugin missing from the editor folder it is whether Game.Plugins lists it.
+        /// </summary>
+        public static EnginePluginState GetEnginePluginState(IAGSEditor editor, Game game, string fileName)
+        {
+            return RunOnMainForm(() =>
+            {
+                AGS.Editor.NativePlugin target = FindNativePlugin(PluginsComponent(editor), fileName);
+                return new EnginePluginState
+                {
+                    Available = target != null,
+                    Enabled = target != null ? target.Enabled : IsInGamePlugins(game, fileName),
+                };
+            });
+        }
+
+        /// <summary>
+        /// Disables a native engine plugin for the current game, the reverse of EnableEnginePlugin: clears
+        /// NativePlugin.Enabled (StopPlugin calls the DLL's AGS_EditorShutdown), so PluginsComponent.BeforeSaveGame
+        /// leaves it out of Game.Plugins on the next save, and removes it from Game.Plugins now. The project tree
+        /// icon is redrawn best-effort. The Windows build never deletes a plugin DLL it copied earlier, so the
+        /// caller removes a stale copy from Compiled\Windows. Returns whether the plugin was enabled before.
+        /// </summary>
+        public static bool DisableEnginePlugin(IAGSEditor editor, Game game, string fileName)
+        {
+            return RunOnMainForm(() =>
+            {
+                object pluginsComp = PluginsComponent(editor);
+                AGS.Editor.NativePlugin target = FindNativePlugin(pluginsComp, fileName);
+                bool wasEnabled = IsInGamePlugins(game, fileName);
+                if (target != null && target.Enabled)
+                {
+                    wasEnabled = true;
+                    target.Enabled = false;
+                }
+                game.Plugins.RemoveAll(p => string.Equals(p.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+                RepopulatePluginsTree(pluginsComp);
+                return wasEnabled;
+            });
+        }
+
+        // PluginsComponent (ComponentIDs.Plugins) keeps its NativePlugin wrappers in a private _plugins list.
+        private static object PluginsComponent(IAGSEditor editor)
+        {
+            foreach (IEditorComponent comp in editor.Components)
+            {
+                if (comp.ComponentID == "Plugins") return comp;
+            }
+            throw new InvalidOperationException("The editor's Plugins component was not found.");
+        }
+
+        private static System.Collections.IEnumerable NativePlugins(object pluginsComp)
+        {
+            FieldInfo field = pluginsComp.GetType().GetField("_plugins", BindingFlags.Instance | BindingFlags.NonPublic);
+            return field?.GetValue(pluginsComp) as System.Collections.IEnumerable
+                ?? throw new InvalidOperationException("Could not read the editor's native-plugin list.");
+        }
+
+        private static AGS.Editor.NativePlugin FindNativePlugin(object pluginsComp, string fileName)
+        {
+            foreach (AGS.Editor.NativePlugin np in NativePlugins(pluginsComp))
+            {
+                if (string.Equals(np.FileName, fileName, StringComparison.OrdinalIgnoreCase)) return np;
+            }
+            return null;
+        }
+
+        private static bool IsInGamePlugins(Game game, string fileName)
+        {
+            foreach (Plugin p in game.Plugins)
+                if (string.Equals(p.FileName, fileName, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        /// <summary>Redraws the Plugins tree node (private RepopulateTreeView) so its enabled icons match. Best-effort.</summary>
+        private static void RepopulatePluginsTree(object pluginsComp)
+        {
+            try { InvokePrivate(pluginsComp, "RepopulateTreeView", Type.EmptyTypes, new object[0]); }
+            catch (Exception e) { Logger.Write("Could not refresh the plugins tree: " + e.Message); }
         }
 
         public static Form MainForm

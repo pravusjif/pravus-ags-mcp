@@ -2,8 +2,8 @@
 
 An [MCP](https://modelcontextprotocol.io) server that runs **inside the Adventure Game Studio 3.6 editor**
 as a plugin. It lets any MCP client (Claude Code, Codex, Gemini CLI, …) work with the project you have open in the editor:
-read and write scripts, edit game data, rooms and assets, build and run the game, and **drive the running
-game** the way a player would.
+read and write scripts, edit game data, rooms, GUIs, fonts and assets, build and run the game, **drive the running
+game** the way a player would, and play a release build with real mouse and keyboard input.
 
 It ships as two DLLs that you copy into the AGS folder — nothing else to install:
 
@@ -13,8 +13,9 @@ It ships as two DLLs that you copy into the AGS folder — nothing else to insta
 
 ## Status
 
-The server covers project creation, scripts, game data, room authoring (backgrounds, masks, objects, events),
-assets, build/run and player simulation. The architecture, design decisions, known gaps and verified AGS facts are
+The server covers project creation, scripts, game data, GUI controls, fonts and text measurement, room authoring
+(backgrounds, masks, objects, events), assets, debug and release builds, player simulation, and a desktop driver
+for release builds. The architecture, design decisions, known gaps and verified AGS facts are
 in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Platform support
@@ -109,14 +110,17 @@ from the MCP menu; settings are saved in `%APPDATA%\AGS-MCP\settings.json`. The 
 
 To use the `game_*` tools you must, once per project: deploy `agsmcp.dll` (above), call `runtime_enable_plugin`,
 then `save_project`. `run_game` then builds the game with the plugin baked in and launches it; the `game_*` tools
-talk to it over a private loopback port. Untick the plugin in the project's Plugins node (or don't ship `agsmcp.dll`)
-for release builds.
+talk to it over a private loopback port. For a release build call `build_game` with `mode=release`: it disables the
+plugin, turns Debug mode off and deletes `agsmcp.dll` from `Compiled\Windows`. `mode=debug` turns both back on, and
+`runtime_disable_plugin` only unticks the plugin. The `desktop_*` tools then test the release build without the
+plugin, through its window.
 
 ### Agent skill
 
 `skills/ags-mcp/` teaches a coding agent to work on the game you have open through these tools: the persistence
 rules, recipes for rooms, objects, characters, dialogs and scripts, the pitfalls worth knowing, AGS 3.6 scripting
-patterns, checking changes in the running game with the `game_*` tools, and a small PIL helper for pixel art. It is
+patterns, checking changes in the running game with the `game_*` tools and a release build with the `desktop_*`
+tools, and helpers for pixel art and sound. It is
 a standard `SKILL.md` folder (instructions plus `references/` and `scripts/`), so:
 
 - **Agents that load `SKILL.md` skills** (Claude Code, and others that support the format): put the folder in the
@@ -137,16 +141,19 @@ You need the .NET SDK and the .NET Framework 4.6+ reference assemblies (Visual S
 native engine plugin additionally needs the **C++ CMake tools for Windows** (also from the VS 2022 installer).
 
 First copy `Local.props.example` to `Local.props` and set `AgsDir` to your AGS 3.6 editor folder. `Local.props` is
-git-ignored; MSBuild and `build.ps1` read it, and `-AgsDir` on the command line overrides it.
+git-ignored; MSBuild and `build.ps1` read it, and `-AgsDir` on the command line overrides it. `build.ps1 -Run` opens
+a throwaway game when no `-Game` is given: `SmokeGame` from `Local.props` if set, else
+`%LOCALAPPDATA%\AGS-MCP\SmokeGame\Game.agf`, which it creates from the Sierra-style template when it is missing.
 
 ```powershell
 .\build.ps1 -Test                    # build the editor plugin + run unit tests
 .\build.ps1 -Engine                  # build the native engine plugin (agsmcp.dll, x86) with CMake
-.\build.ps1 -Engine -Deploy -Run     # build both, copy into AgsDir, start the editor (-Game <Game.agf> to open one)
+.\build.ps1 -Engine -Deploy -Run     # build both, copy into AgsDir, start the editor (opens -Game <Game.agf>, else the smoke game)
 .\build.ps1 -Engine -Package         # build both and zip a release into dist\
 ```
 
-The editor locks plugin DLLs, so close it before you deploy (`-StopEditor` closes it for you, but any unsaved work is lost).
+The editor locks plugin DLLs, so close it before you deploy (`-StopEditor` closes it for you: it saves the open game through the MCP server, then kills the editor, so
+work is lost only when the server cannot answer).
 
 ### Releasing
 
@@ -157,7 +164,7 @@ README and LICENSE). Running the workflow by hand produces the zip as a build ar
 
 ## Tools
 
-All tools carry `readOnlyHint`/`destructiveHint` annotations. Changes to the project model are in memory until you
+The server has 79 tools (`tools/list` in 0.2.0). All tools carry `readOnlyHint`/`destructiveHint` annotations. Changes to the project model are in memory until you
 call `save_project`. Coordinates and IDs are as AGS uses them; `id` accepts either the numeric ID or the script name.
 The names in the signatures below are the argument keys, and `[x]` marks an optional one. An argument a tool does not
 take is refused, with the list of the ones it does.
@@ -165,11 +172,12 @@ take is refused, with the list of the ones it does.
 ### Project
 | Tool | Description |
 |------|-------------|
-| `project_info` | Name, folder, resolution, colour depth, editor version and entity counts. |
+| `project_info` | Name, folder, resolution, colour depth, editor version, entity counts, enabled `plugins`, `debugMode`, and `enginePlugin{available, enabled}` for `agsmcp.dll`. |
 | `save_project` | Write all in-memory changes to disk (`Game.agf`, scripts, sprites, the loaded room). |
+| `batch(calls, [stopOnError])` | Run several tool calls `[{name, arguments}]` in order in one request; returns each call's `ok` and `content` or `error` (JSON text parsed, images replaced by a note). Stops at the first failure unless `stopOnError=false`. |
 | `create_project(folder, [template], [gameName], [fileName], [saveCurrent])` | Create a game from an editor template (Sierra-style, Empty Game, …) in a new or empty folder and open it. |
 | `open_project(path, [saveCurrent])` | Open another game (`Game.agf` or its folder) in the editor. |
-| `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, audiofolder, globalvariable, customproperty). |
+| `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, guicontrol, view, cursor, font, audioclip, audiocliptype, audiofolder, globalvariable, customproperty). |
 | `find_usages(name, [limit])` | Whole-word search for an identifier across script modules, room scripts and dialog scripts. |
 
 ### Game data
@@ -177,21 +185,26 @@ take is refused, with the list of the ones it does.
 |------|-------------|
 | `get_properties(type, id)` | All properties of an entity (honours the editor's property-grid metadata), plus its events for characters and inventory items. |
 | `set_properties(type, id, properties)` | Set one or more properties (enum by name or number; script-name uniqueness enforced). |
-| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, audio type, audio folder, global variable or custom-property definition. Properties that fit nothing are listed in `ignored`. |
+| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, font (a copy of font 0 or `CopyFrom`), audio type, audio folder, global variable or custom-property definition. Properties that fit nothing are listed in `ignored`. |
 | `delete_entity(type, id)` | Delete an entity and renumber IDs as the editor does. |
 | `get_dialog_script(id)` / `set_dialog_script(id, [script], [options])` | Read/write a dialog's options (`{text, show, say}`) and its dialog-script text. |
-| `set_event(type, id, event, [function])` | Bind a character or inventory event (Look, Interact, Talk, UseInv, …) and add a stub to GlobalScript. |
+| `set_event(type, id, event, [function])` | Bind a character, inventory, GUI or GUI-control event (Look, Interact, Talk, UseInv, …, OnClick) and add a stub to GlobalScript. |
+| `list_gui_controls(gui)` | A GUI's controls with ID, name, type, position, size and bound events. A control is `type=guicontrol id="<gui>:<control>"` in the property and event tools. |
+| `create_gui_control(gui, type, [x], [y], [width], [height], [properties])` | Add a button, label, text box, list box, slider or inventory window to a GUI, as the GUI editor does. |
+| `delete_gui_control(gui, control)` | Delete a control; higher control IDs move down. |
 | `setting` (as a `*_properties` type) | The game-wide Settings object is addressable like an entity. |
 
 ### Scripts
 | Tool | Description |
 |------|-------------|
 | `list_scripts` | List script modules (name, header/body) and room scripts (`roomN`). |
-| `read_script(name, [header], [startLine], [endLine])` | Read a module's body or header, or a room script (`room1`), optionally a line range. |
+| `read_script(name, [header], [startLine], [endLine])` | Read a module's body or header, or a room script (`room1`), optionally a line range. `staleOnDisk` is true when the file was changed outside the editor. |
 | `write_script(name, text, [header])` | Replace a module's or room script's full contents. |
 | `edit_script(name, find, replace, [header], [all])` | Exact find/replace (newline-agnostic). |
+| `reload_script(name)` | Replace the editor's copy of a module (header and body) or room script with the file on disk, after an outside edit. |
 | `create_script_module(name, [headerText], [scriptText])` | Create a new `.asc`/`.ash` module just above GlobalScript, so GlobalScript can use its header. |
-| `compile([name])` | Compile one module (with its preceding headers), a room script (`roomN`, with the room's hotspot/object names) or all modules; returns structured errors/warnings with file and line. |
+| `move_script_module(name, direction, [index])` | Move a module up, down or to `index` in the compile order (not GlobalScript; not in projects with script folders). |
+| `compile([name])` | Compile one module (with its preceding headers), a room script (`roomN`, with the room's hotspot/object names) or all modules; returns structured errors/warnings with file and line, and `staleOnDisk`: the input files changed on disk outside the editor. |
 | `script_api_lookup(query, [limit])` | Search the built-in API and project headers; returns signatures, source header and `///` docs. |
 
 ### Rooms
@@ -205,7 +218,7 @@ take is refused, with the list of the ones it does.
 | `import_room_mask(number, mask, path\|base64)` | Replace a mask with an indexed image (palette index = area). |
 | `get_room_properties(number, entity)` / `set_room_properties(number, entity, properties)` | Properties of the room or a hotspot, object, region, walkable area or walk-behind (by ID or script name). |
 | `create_room_object(number, [properties])` / `delete_room_object(number, object)` | Add or remove a room object. |
-| `render_room(number, [mask], [background])` | Render a background to PNG, optionally overlaying a mask with a colour legend. |
+| `render_room(number, [mask], [background], [outPath])` | Render a background to PNG, optionally overlaying a mask with a colour legend. `outPath` writes the PNG to that absolute path and returns `{path, width, height, note}` instead of the image. |
 | `get_mask_pixel(number, mask, x, y)` | The area number at a pixel of a room mask (0 = none). |
 | `set_room_event(number, entity, event, [function])` | Bind a `room`/`hotspot:N`/`object:N`/`region:N` event to a function and add a stub to the room script. |
 
@@ -217,10 +230,15 @@ the room script.
 | Tool | Description |
 |------|-------------|
 | `import_sprite(path\|base64, [folder], [transparency], [alpha])` | Import a sprite into a folder (or the root). |
-| `get_sprite(number)` | Return a sprite as a PNG. |
+| `list_sprites([folder], [flat])` | Sprite folder tree with each sprite's number, size, colour depth and alpha; `flat=true` lists every sprite under the folder. |
+| `create_sprite_folder(name, [parent])` | Create a sprite folder (names are unique project-wide; a taken name gets a number). |
+| `get_sprite(number, [outPath])` | Return a sprite as a PNG, or write it to `outPath`. |
 | `replace_sprite(number, path\|base64, …)` | Replace a sprite's image, keeping its number. |
 | `delete_sprite(number)` | Delete a sprite (refuses with a usage report if still referenced). |
 | `create_view([name], loops)` | Create a view; `loops` is an array of `{frames, runNextLoop?}` and each frame is `{sprite, delay?, flipped?, sound?}` (`sound` is an audio clip's index). |
+| `import_font(id, path, [height], [pointSize])` | Import a TTF or WFN file over a font slot (`agsfnt<id>.ttf\|.wfn`); a TTF takes a pixel `height` or a `pointSize`. New slots come from `create_entity font`. |
+| `measure_text(font, text, [maxWidth])` | Measure and wrap text in a WFN font as the engine does (`[` breaks, wrap at `maxWidth`); widths, line heights and the wrapped lines. TTF fonts are refused. |
+| `list_strings([type], [contains], [rooms], [limit], [offset])` | The game's player-visible text, as the translation source collects it (dialog options and speech, script string literals, GUI texts, descriptions, messages); `rooms=true` adds room messages and descriptions. |
 
 ### Audio
 | Tool | Description |
@@ -237,25 +255,44 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 ### Build and run
 | Tool | Description |
 |------|-------------|
-| `build_game([rebuild])` | Compile to `Compiled\Windows\<name>.exe`; returns structured messages. |
-| `run_game([startRoom], [rebuild])` | Build (incrementally) and launch the game windowed, logging to a file; stops any prior game before building. |
+| `build_game([rebuild], [mode])` | Save, then compile to `Compiled\Windows\<name>.exe`, as the editor's Build command does (a Debug-mode change forces a rebuild); returns structured messages, `debugMode` and `enginePlugin`. `mode=release` disables the `agsmcp` plugin, turns Debug mode off and deletes a stale `agsmcp.dll` from the build folder; `mode=debug` turns both back on. The mode is saved with the project. |
+| `run_game([startRoom], [rebuild], [mode])` | Build as `build_game` does (saving first) and launch the game windowed, logging to a file; stops any prior game, or a leftover one running the built exe, before building. |
 | `stop_game` | Stop the running game. |
 | `game_status` | Running/exited, pid, exit code, uptime, log path. |
-| `get_game_log([sinceLine], [limit])` | Tail the engine log with a `nextLine` cursor. |
+| `get_game_log([sinceLine], [limit], [source])` | Tail the engine log with a `nextLine` cursor (the next line the engine writes); `source` is `engine` (`run_game`) or `desktop` (`desktop_run`), by default the last launched. |
 
 ### Player simulation (needs `agsmcp.dll`)
 | Tool | Description |
 |------|-------------|
 | `runtime_enable_plugin` | Enable the `agsmcp` engine plugin for the project (then `save_project`). |
+| `runtime_disable_plugin` | Disable it again (then `save_project`); `build_game mode=release` also does this and removes the copied DLL. |
 | `game_state` | Live snapshot: room, player, characters, objects (views numbered as in the editor), mouse, score, interface-enabled, cutscene and paused flags, recent events. |
-| `game_screenshot` | Capture the running game as a PNG. |
+| `game_screenshot([outPath], [frames], [everyN])` | Capture the running game as a PNG, or write it to `outPath`. `frames > 1` is a burst, one frame every `everyN` game frames, written to the `outPath` directory as `frame-NNN.png` plus `frames.json` (per-frame times). |
 | `game_click(x, y, [button])` | Move the mouse and click (real input; moves the OS cursor). |
 | `game_process_click(x, y, [mode], [inventory])` | Click at room coordinates in a cursor mode, as a player would (queued; `inventory` selects the item for UseInv). |
-| `game_key(key)` | Simulate a key press (letter/digit/`Space`/`Enter`/`F5`/arrows… or a raw code). |
+| `game_key(key)` | Simulate a key press (letter/digit/`Space`/`Enter`/`F5`/arrows… or a raw code). Navigation and function keys are posted to the game window as real keys. |
+| `game_type(text)` | Type text as character input for GUI text boxes and `on_text_input`. |
 | `game_hover_name(x, y)` | The name of whatever is at a screen point. |
-| `game_wait_until(condition, [room], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or time out. |
+| `game_wait_until(condition, [room], [pattern], [sinceLine], [source], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or until a game log line matches the regex `pattern` (`logLine`, from `sinceLine`, in the `source` game's log), or time out. |
 | `game_get_global_int(index)` / `game_set_global_int(index, value)` | Read/write a legacy GlobalInt. |
-| `game_call_function(name, [args])` | Queue a function defined in GlobalScript.asc (0–2 integer args; refused if GlobalScript does not define it). Keep it non-blocking. |
+| `game_call_function(name, [args], [roomScript])` | Queue a function defined in GlobalScript.asc, or with `roomScript=true` in the current room's `roomN.asc` (0–2 integer args; refused if that script does not define it). Keep it non-blocking. |
+| `game_text_extent(font, text)` | Width and height of one line as the running game draws it (engine `GetTextExtent`; TTF fonts too). |
+| `game_run_interaction(target, mode, [inventory])` | Click a hotspot, object or character of the current room (`hotspot:N`, `object:oName`, `character:cName`…) in a cursor mode: the point comes from the mask or sprite, is confirmed with the hover name, then a click is queued. Refuses rather than mis-clicking. |
+
+### Desktop driver (any build, no plugin)
+Test the game a player gets: a release build (`build_game mode=release`) with no engine plugin, observed through its window and driven by real mouse and keyboard input. The software renderer is the default because Direct3D and OpenGL windows read back black.
+
+| Tool | Description |
+|------|-------------|
+| `desktop_run([exe], [startRoom], [renderer], [gameWidth], [gameHeight])` | Launch a game exe windowed (default: the open game's built exe) with its own log, and wait for its window. |
+| `desktop_status` | Running, pid, log, and the window's client area with the game's scale and offset in it. |
+| `desktop_stop` | Stop it. |
+| `desktop_screenshot([outPath], [frames], [intervalMs])` | Capture the window at the game's native size as a PNG; `frames > 1` writes a timed burst (`frame-NNN.png` + `frames.json`) into the `outPath` directory. |
+| `desktop_click(x, y, [button])` | Bring the window to the front and click a point in game coordinates with the real mouse (`left`/`right`/`middle`). Refuses when the window cannot be brought forward or another window covers the point. |
+| `desktop_key(key, [holdMs])` | Press a key with the real keyboard: a name, letter, digit, `F1`..`F24` or `0xNN`, with optional `Ctrl+`/`Shift+`/`Alt+`. Navigation keys go as extended keys, so NumLock does not turn them into digits. |
+| `desktop_type(text)` | Type text as Unicode keyboard input, which reaches text boxes and `on_text_input`. |
+
+`get_game_log(source=desktop)` reads this game's log, and `game_wait_until(condition=logLine, source=desktop)` waits on it; without `source` both use whichever game was launched last.
 
 ## Testing
 
@@ -263,7 +300,7 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 - **Smoke test:** `tests\smoke\smoke.ps1` drives a live editor through every tool group over HTTP on a throwaway
   game it creates from the Sierra-style template (compile error and fix, a property round-trip, room authoring,
   `render_room`, `import_sprite`, the audio tools, `build_game`, `run_game`, `game_*`), then reopens the game you had open and
-  deletes the throwaway one. Run it after `build.ps1 -Engine -Deploy -Run -Game <Game.agf>`: with no game open, the
+  deletes the throwaway one. Run it after `build.ps1 -Engine -Deploy -Run`, which opens `-Game` or the smoke game: with no game open, the
   editor's start-up dialog refuses every tool call.
 
 ## Layout

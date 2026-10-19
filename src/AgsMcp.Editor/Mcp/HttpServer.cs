@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
@@ -59,11 +60,13 @@ namespace AgsMcp.Editor.Mcp
         {
             var v4 = new TcpListener(IPAddress.Loopback, _port);
             v4.Start(); // throws SocketException if the port is in use: let the caller report it
+            NotInherited(v4.Server);
             _listeners.Add(v4);
             try
             {
                 var v6 = new TcpListener(IPAddress.IPv6Loopback, _port);
                 v6.Start();
+                NotInherited(v6.Server);
                 _listeners.Add(v6);
             }
             catch (SocketException)
@@ -103,9 +106,25 @@ namespace AgsMcp.Editor.Mcp
                     if (!_running) return;
                     continue;
                 }
+                NotInherited(client.Client);
                 ThreadPool.QueueUserWorkItem(_ => HandleConnection(client));
             }
         }
+
+        /// <summary>
+        /// Keep a socket out of the processes the editor starts (run_game, desktop_run, builds): Process.Start lets
+        /// children inherit inheritable handles, so a game still running after the editor was killed held port 7471
+        /// and the next editor could not listen (verified).
+        /// </summary>
+        private static void NotInherited(Socket socket)
+        {
+            try { SetHandleInformation(socket.Handle, HandleFlagInherit, 0); } catch (Exception) { /* best effort */ }
+        }
+
+        private const uint HandleFlagInherit = 1;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
 
         private void HandleConnection(TcpClient client)
         {
