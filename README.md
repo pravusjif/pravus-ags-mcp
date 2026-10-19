@@ -267,7 +267,8 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | `game_screenshot([outPath])` | Capture the running game as a PNG, or write it to `outPath`. |
 | `game_click(x, y, [button])` | Move the mouse and click (real input; moves the OS cursor). |
 | `game_process_click(x, y, [mode], [inventory])` | Click at room coordinates in a cursor mode, as a player would (queued; `inventory` selects the item for UseInv). |
-| `game_key(key)` | Simulate a key press (letter/digit/`Space`/`Enter`/`F5`/arrows… or a raw code). |
+| `game_key(key)` | Simulate a key press (letter/digit/`Space`/`Enter`/`F5`/arrows… or a raw code). Navigation and function keys are posted to the game window as real keys. |
+| `game_type(text)` | Type text as character input for GUI text boxes and `on_text_input`. |
 | `game_hover_name(x, y)` | The name of whatever is at a screen point. |
 | `game_wait_until(condition, [room], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or time out. |
 | `game_get_global_int(index)` / `game_set_global_int(index, value)` | Read/write a legacy GlobalInt. |

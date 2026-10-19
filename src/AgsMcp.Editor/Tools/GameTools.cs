@@ -29,6 +29,7 @@ namespace AgsMcp.Editor.Tools
             yield return GameClick(ctx, client);
             yield return GameProcessClick(ctx, client);
             yield return GameKey(ctx, client);
+            yield return GameType(ctx, client);
             yield return GameHoverName(ctx, client);
             yield return GameWaitUntil(ctx, client);
             yield return GameGetGlobalInt(ctx, client);
@@ -135,15 +136,23 @@ namespace AgsMcp.Editor.Tools
 
                 byte[] png;
                 int width, height;
-                using (var bmp = new Bitmap(path))
-                using (var ms = new MemoryStream())
+                try
                 {
-                    bmp.Save(ms, ImageFormat.Png);
-                    png = ms.ToArray();
-                    width = bmp.Width;
-                    height = bmp.Height;
+                    using (var bmp = new Bitmap(path))
+                    using (var ms = new MemoryStream())
+                    {
+                        bmp.Save(ms, ImageFormat.Png);
+                        png = ms.ToArray();
+                        width = bmp.Width;
+                        height = bmp.Height;
+                    }
                 }
-                return ImageOutput.Result(args, png, width, height, "Screenshot of the running game (" + path + ").");
+                finally
+                {
+                    // Each shot is a fresh agsmcp-<n>.bmp in the game's save folder; do not let them pile up.
+                    try { File.Delete(path); } catch (Exception e) { Logger.Write("Could not delete " + path + ": " + e.Message); }
+                }
+                return ImageOutput.Result(args, png, width, height, "Screenshot of the running game.");
             },
         };
 
@@ -199,7 +208,10 @@ namespace AgsMcp.Editor.Tools
             Name = "game_key",
             Title = "Press a key in the game",
             Description = "Simulate a key press. key is a letter, digit, or a name such as Space, Enter, Escape, F1..F12, " +
-                          "Up/Down/Left/Right, Home/End/PageUp/PageDown, Insert/Delete (or a raw AGS key code number).",
+                          "Up/Down/Left/Right, Home/End/PageUp/PageDown, Insert/Delete (or a raw AGS key code number). " +
+                          "Backspace/Tab/Enter, F1..F12 and the navigation keys are posted to the game window as real keys " +
+                          "(via=window); the rest go through Game.SimulateKeyPress. on_key_press receives the AGS code " +
+                          "(Up = 372, F7 = 365). To type text into a GUI text box use game_type.",
             InputSchema = Schema.Object()
                 .Required("key", Schema.String("Key name, letter, digit, or raw AGS key code."))
                 .Build(),
@@ -209,7 +221,30 @@ namespace AgsMcp.Editor.Tools
             {
                 RequireRunning(ctx);
                 int code = KeyMap.Resolve(args.String("key"));
-                return ToolResult.Json(Ok(client.Send("key", new JObject { ["code"] = code })));
+                JObject resp = Ok(client.Send("key", new JObject { ["code"] = code }));
+                resp["code"] = code;
+                return ToolResult.Json(resp);
+            },
+        };
+
+        private static Tool GameType(ToolContext ctx, EngineClient client) => new Tool
+        {
+            Name = "game_type",
+            Title = "Type text in the game",
+            Description = "Type text into the running game as character input (WM_CHAR per character, which the engine " +
+                          "receives as text input): it fills a focused GUI text box and reaches on_text_input. It does not " +
+                          "press keys, so on_key_press does not run; use game_key for Enter, Backspace and other keys.",
+            InputSchema = Schema.Object()
+                .Required("text", Schema.String("The text to type."))
+                .Build(),
+            Annotations = ToolAnnotations.Mutating,
+            RunOnUiThread = false,
+            Handler = args =>
+            {
+                RequireRunning(ctx);
+                string text = args.String("text");
+                if (string.IsNullOrEmpty(text)) throw new ToolException("'text' must not be empty.");
+                return ToolResult.Json(Ok(client.Send("type", new JObject { ["text"] = text })));
             },
         };
 

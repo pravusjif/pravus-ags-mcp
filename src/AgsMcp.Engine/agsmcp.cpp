@@ -67,15 +67,24 @@ struct Request {
 
 static std::mutex g_qmtx;
 static std::deque<std::shared_ptr<Request> > g_queue;
+// The request the main thread is handling (under g_qmtx). A command can quit the game from inside its handler
+// (call_function runs a QuitGame at once), so AGS_EngineShutdown must answer it: it will never return.
+static std::shared_ptr<Request> g_current;
 
 // ---- event log (main thread only) ------------------------------------------
 static std::deque<std::string> g_events;
 
 // ---- server ----------------------------------------------------------------
+// g_listen and g_client are closed from two threads (the worker when a client leaves, AGS_EngineShutdown on the
+// main thread), so both are only touched under g_sock_mtx.
 static std::atomic<bool> g_server_running(false);
+static std::atomic<bool> g_worker_done(false);
+static std::mutex g_sock_mtx;
 static SOCKET g_listen = INVALID_SOCKET;
+static SOCKET g_client = INVALID_SOCKET;
 static std::thread g_worker;
 static int g_port = 0;
+static int g_shot_counter = 0; // main thread only
 
 static void log_info(const char* msg) {
     if (engine) engine->Log(AGSLOG_LEVEL_INFO, "agsmcp: %s", msg);
@@ -194,15 +203,49 @@ static jm::Value cmd_state() {
     return r;
 }
 
-// Post a key down/up pair to the game window so SDL sees it as a real key press.
-static bool post_window_key(int vk) {
+// Post a key down/up pair to the game window so SDL sees it as a real key press. SDL reads the scan code from
+// lParam bits 16-23 and the extended-key flag from bit 24: without that flag the arrows, Home/End, PgUp/PgDn and
+// Ins/Del share their scan codes with the numeric keypad and arrive as keypad keys (digits with NumLock on).
+static bool post_window_key(int vk, bool extended) {
     HWND hwnd = engine->GetWindowHandle();
     if (!hwnd) return false;
     UINT scan = MapVirtualKeyA(vk, MAPVK_VK_TO_VSC);
     LPARAM down = 1 | ((LPARAM)scan << 16);
+    if (extended) down |= (LPARAM)1 << 24;
     PostMessageA(hwnd, WM_KEYDOWN, vk, down);
     PostMessageA(hwnd, WM_KEYUP, vk, down | ((LPARAM)1 << 30) | ((LPARAM)1 << 31));
     return true;
+}
+
+// AGS key codes that go to the window as real keys instead of Game.SimulateKeyPress. That maps 1..26 to
+// Ctrl+A..Z (so Backspace/Tab/Enter arrive as Ctrl+H/I/M) and Home..Delete to the keypad scan codes first
+// (ags_key_to_sdl_scan), which NumLock turns into digits. Keep in step with KeyMap.IsWindowRouted (C#).
+struct WindowKey { int code; int vk; bool extended; };
+static const WindowKey kWindowKeys[] = {
+    { 8, VK_BACK, false }, { 9, VK_TAB, false }, { 13, VK_RETURN, false },
+    { 359, VK_F1, false }, { 360, VK_F2, false }, { 361, VK_F3, false }, { 362, VK_F4, false }, { 363, VK_F5, false },
+    { 364, VK_F6, false }, { 365, VK_F7, false }, { 366, VK_F8, false }, { 367, VK_F9, false }, { 368, VK_F10, false },
+    { 433, VK_F11, false }, { 434, VK_F12, false },
+    { 371, VK_HOME, true }, { 372, VK_UP, true }, { 373, VK_PRIOR, true }, { 375, VK_LEFT, true },
+    { 377, VK_RIGHT, true }, { 379, VK_END, true }, { 380, VK_DOWN, true }, { 381, VK_NEXT, true },
+    { 382, VK_INSERT, true }, { 383, VK_DELETE, true },
+};
+
+static const WindowKey* find_window_key(int code) {
+    for (const WindowKey& k : kWindowKeys)
+        if (k.code == code) return &k;
+    return nullptr;
+}
+
+// Decode UTF-8 into UTF-16 units (invalid bytes become U+FFFD).
+static std::vector<wchar_t> utf8_to_utf16(const std::string& s) {
+    std::vector<wchar_t> out;
+    if (s.empty()) return out;
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
+    if (n <= 0) return out;
+    out.resize((size_t)n);
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), out.data(), n);
+    return out;
 }
 
 static jm::Value cmd_screenshot() {
@@ -212,13 +255,15 @@ static jm::Value cmd_screenshot() {
         r.set("error", "SaveScreenShot is not available");
         return r;
     }
-    const char* scriptPath = "$SAVEGAMEDIR$/agsmcp.bmp";
-    int res = fn_savescreenshot(scriptPath);
+    // A fresh name per shot: a failed save can never hand back the previous picture. The editor side deletes it.
+    std::string scriptPath = "$SAVEGAMEDIR$/agsmcp-" + std::to_string((long long)++g_shot_counter) + ".bmp";
+    int res = fn_savescreenshot(scriptPath.c_str());
     char buf[1024];
     buf[0] = 0;
-    engine->ResolveFilePath(scriptPath, buf, sizeof(buf));
+    engine->ResolveFilePath(scriptPath.c_str(), buf, sizeof(buf));
     std::string path(buf);
-    r.set("ok", !path.empty());
+    r.set("ok", res != 0 && !path.empty());
+    if (res == 0) r.set("error", "SaveScreenShot failed");
     r.set("result", res);
     r.set("path", path);
     return r;
@@ -271,10 +316,8 @@ static jm::Value handle_command(const std::string& cmd, const jm::Value& args) {
     }
     if (cmd == "key") {
         int code = argi(args, "code");
-        // Game.SimulateKeyPress treats codes 1..26 as Ctrl+A..Z, so Backspace (8), Tab (9) and
-        // Enter (13) would arrive as Ctrl+H/I/M. Post those as real window key messages instead.
-        int vk = code == 8 ? VK_BACK : code == 9 ? VK_TAB : code == 13 ? VK_RETURN : 0;
-        if (vk && post_window_key(vk)) {
+        const WindowKey* wk = find_window_key(code);
+        if (wk && post_window_key(wk->vk, wk->extended)) {
             r.set("ok", true);
             r.set("via", "window");
             return r;
@@ -282,6 +325,22 @@ static jm::Value handle_command(const std::string& cmd, const jm::Value& args) {
         if (!fn_simkey) { r.set("ok", false); r.set("error", "SimulateKeyPress is not available"); return r; }
         fn_simkey(code);
         r.set("ok", true);
+        r.set("via", "SimulateKeyPress");
+        return r;
+    }
+    if (cmd == "type") {
+        // Text for GUI text boxes and on_text_input: WM_CHAR per UTF-16 unit, which SDL turns into text input.
+        std::string text;
+        if (args.type == jm::Type::Obj) {
+            const jm::Value* tv = args.find("text");
+            if (tv) text = tv->as_str();
+        }
+        HWND hwnd = engine->GetWindowHandle();
+        if (!hwnd) { r.set("ok", false); r.set("error", "the game window is not available"); return r; }
+        std::vector<wchar_t> units = utf8_to_utf16(text);
+        for (wchar_t u : units) PostMessageW(hwnd, WM_CHAR, (WPARAM)u, 1);
+        r.set("ok", true);
+        r.set("units", (int)units.size());
         return r;
     }
     if (cmd == "hover_name") {
@@ -349,6 +408,16 @@ static void resolve_functions() {
     }
 }
 
+static void complete_request(const std::shared_ptr<Request>& req, const jm::Value& result) {
+    {
+        std::lock_guard<std::mutex> lk(req->m);
+        if (req->done) return;
+        req->result = result;
+        req->done = true;
+    }
+    req->cv.notify_all();
+}
+
 // Drain the command queue on the game main thread.
 static void drain_queue() {
     resolve_functions();
@@ -359,15 +428,41 @@ static void drain_queue() {
             if (g_queue.empty()) break;
             req = g_queue.front();
             g_queue.pop_front();
+            g_current = req;
         }
         jm::Value result = handle_command(req->cmd, req->args);
         {
-            std::lock_guard<std::mutex> lk(req->m);
-            req->result = result;
-            req->done = true;
+            std::lock_guard<std::mutex> lk(g_qmtx);
+            g_current.reset();
         }
-        req->cv.notify_all();
+        complete_request(req, result);
     }
+}
+
+static jm::Value shutting_down_result() {
+    jm::Value r = jm::Value::MkObj();
+    r.set("ok", false);
+    r.set("error", "shutting down");
+    return r;
+}
+
+// Answer every outstanding request at once (the game is quitting, so PRERENDER will not drain them again): the one
+// being handled ran and caused the quit, the queued ones never run.
+static void fail_outstanding_requests() {
+    std::deque<std::shared_ptr<Request> > pending;
+    std::shared_ptr<Request> current;
+    {
+        std::lock_guard<std::mutex> lk(g_qmtx);
+        pending.swap(g_queue);
+        current.swap(g_current);
+    }
+    if (current) {
+        jm::Value r = jm::Value::MkObj();
+        r.set("ok", true);
+        r.set("gameExiting", true);
+        complete_request(current, r);
+    }
+    for (const std::shared_ptr<Request>& req : pending) complete_request(req, shutting_down_result());
 }
 
 // Enqueue a command and wait for the main thread to process it.
@@ -376,7 +471,10 @@ static jm::Value call_on_main(const std::string& cmd, const jm::Value& args) {
     req->cmd = cmd;
     req->args = args;
     {
+        // Checked under the queue lock: AGS_EngineShutdown clears the flag under it before failing the queue,
+        // so a request can never be queued after that and wait out the timeout.
         std::lock_guard<std::mutex> lk(g_qmtx);
+        if (!g_server_running) return shutting_down_result();
         g_queue.push_back(req);
     }
     std::unique_lock<std::mutex> lk(req->m);
@@ -421,10 +519,14 @@ static bool send_all(SOCKET s, const std::string& data) {
 }
 
 static void handle_client(SOCKET c) {
+    // A receive timeout lets the loop notice shutdown even when the client keeps an idle connection open.
+    DWORD timeout_ms = 500;
+    setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout_ms, sizeof(timeout_ms));
     std::string buf;
     char tmp[4096];
     while (g_server_running) {
         int n = recv(c, tmp, sizeof(tmp), 0);
+        if (n == SOCKET_ERROR && WSAGetLastError() == WSAETIMEDOUT) continue;
         if (n <= 0) break;
         buf.append(tmp, (size_t)n);
         size_t pos;
@@ -440,15 +542,22 @@ static void handle_client(SOCKET c) {
     }
 }
 
+static void server_loop();
+
 static void server_main() {
+    server_loop();
+    g_worker_done = true;
+}
+
+static void server_loop() {
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return;
 
-    g_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (g_listen == INVALID_SOCKET) { WSACleanup(); return; }
+    SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listener == INVALID_SOCKET) { WSACleanup(); return; }
 
     BOOL reuse = TRUE;
-    setsockopt(g_listen, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
 
     sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -456,23 +565,40 @@ static void server_main() {
     addr.sin_port = htons((unsigned short)g_port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 
-    if (bind(g_listen, (sockaddr*)&addr, sizeof(addr)) != 0 || listen(g_listen, 4) != 0) {
-        closesocket(g_listen);
-        g_listen = INVALID_SOCKET;
+    if (bind(listener, (sockaddr*)&addr, sizeof(addr)) != 0 || listen(listener, 4) != 0) {
+        closesocket(listener);
         WSACleanup();
         log_info("failed to bind the loopback server socket");
         return;
     }
+    {
+        // Published under the lock so that a shutdown racing the start-up either sees it or stops it here.
+        std::lock_guard<std::mutex> lk(g_sock_mtx);
+        if (!g_server_running) { closesocket(listener); WSACleanup(); return; }
+        g_listen = listener;
+    }
     log_info("MCP engine bridge listening");
 
+    // accept() runs without the lock; shutdown closes g_listen to unblock it
     while (g_server_running) {
-        SOCKET c = accept(g_listen, 0, 0);
+        SOCKET c = accept(listener, 0, 0);
         if (c == INVALID_SOCKET) break;
+        {
+            std::lock_guard<std::mutex> lk(g_sock_mtx);
+            if (!g_server_running) { closesocket(c); break; }
+            g_client = c;
+        }
         handle_client(c);
-        closesocket(c);
+        {
+            std::lock_guard<std::mutex> lk(g_sock_mtx);
+            if (g_client == c) { closesocket(c); g_client = INVALID_SOCKET; } // else shutdown closed it
+        }
     }
 
-    if (g_listen != INVALID_SOCKET) { closesocket(g_listen); g_listen = INVALID_SOCKET; }
+    {
+        std::lock_guard<std::mutex> lk(g_sock_mtx);
+        if (g_listen != INVALID_SOCKET) { closesocket(g_listen); g_listen = INVALID_SOCKET; }
+    }
     WSACleanup();
 }
 
@@ -519,13 +645,36 @@ DLLEXPORT void AGS_EngineStartup(IAGSEngine* lpEngine) {
     g_worker = std::thread(server_main);
 }
 
+// Called on the main thread while the game quits. The worker may be blocked in accept(), in recv() on the
+// editor's persistent connection, or waiting for a queued request that PRERENDER will never drain again; each
+// is released here, so the join (and the game's exit) does not wait on the editor.
 DLLEXPORT void AGS_EngineShutdown() {
-    g_server_running = false;
-    if (g_listen != INVALID_SOCKET) {
-        closesocket(g_listen); // unblock accept()
-        g_listen = INVALID_SOCKET;
+    if (!g_worker.joinable()) return; // inert, or never started
+    {
+        std::lock_guard<std::mutex> lk(g_qmtx);
+        g_server_running = false;
     }
-    if (g_worker.joinable()) g_worker.join();
+    {
+        std::lock_guard<std::mutex> lk(g_sock_mtx);
+        if (g_listen != INVALID_SOCKET) {
+            closesocket(g_listen); // unblocks accept()
+            g_listen = INVALID_SOCKET;
+        }
+    }
+    fail_outstanding_requests();
+    // Let the worker send those answers and leave by itself: its recv() wakes within the 500 ms receive timeout.
+    // If it has not gone after 2 s (stuck in send to a client that does not read), cut the connection.
+    for (int waited = 0; !g_worker_done && waited < 2000; waited += 10)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (!g_worker_done) {
+        std::lock_guard<std::mutex> lk(g_sock_mtx);
+        if (g_client != INVALID_SOCKET) {
+            shutdown(g_client, SD_BOTH);
+            closesocket(g_client);
+            g_client = INVALID_SOCKET;
+        }
+    }
+    g_worker.join();
 }
 
 DLLEXPORT intptr_t AGS_EngineOnEvent(int event, intptr_t data) {

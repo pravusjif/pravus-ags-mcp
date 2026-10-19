@@ -449,6 +449,19 @@ try {
         $r -ne $null
     }
 
+    # Hooks for the run checks: log every key and text character, and a function that quits the game.
+    Check "GlobalScript gets key/text logging and MCP_Quit, and compiles" {
+        $t = (Get-Json (Invoke-Mcp "read_script" @{ name = "GlobalScript" })).text
+        $hooked = [regex]::Replace($t, '(function on_key_press\([^)]*\)\s*\{)', "`$1`r`n  System.Log(eLogInfo, `"MCPKEY %d`", keycode);", 1)
+        $hooked += "`r`nfunction on_text_input(int ch)`r`n{`r`n  System.Log(eLogInfo, `"MCPTXT %d`", ch);`r`n}`r`n" +
+                   "`r`nfunction MCP_Quit()`r`n{`r`n  QuitGame(0);`r`n}`r`n"
+        Invoke-Mcp "write_script" @{ name = "GlobalScript"; text = $hooked } | Out-Null
+        $c = Get-Json (Invoke-Mcp "compile")
+        $hooked -ne $t -and $c.ok -eq $true
+    }
+    # Log lines since the given 0-based line.
+    function Get-GameLogSince { param([int]$Since) Get-Json (Invoke-Mcp "get_game_log" @{ sinceLine = $Since; limit = 5000 }) }
+
     # ---- Build ----
     Write-Host "Build" -ForegroundColor Cyan
     Check "build_game succeeds" { (Get-Json (Invoke-Mcp "build_game" @{} 300)).ok -eq $true }
@@ -504,7 +517,34 @@ try {
         $j = Get-Json (Invoke-Mcp "game_screenshot" @{ outPath = $shot })
         (Get-Item $shot).Length -gt 0 -and $j.width -gt 0
     }
+    Check "game_key Up and F7 reach on_key_press as 372 and 365 (window-routed)" {
+        $since = (Get-GameLogSince 0).nextLine
+        $up = Get-Json (Invoke-Mcp "game_key" @{ key = "Up" })
+        $f7 = Get-Json (Invoke-Mcp "game_key" @{ key = "F7" })
+        Start-Sleep -Milliseconds 800
+        $lines = (Get-GameLogSince $since).lines
+        $up.via -eq "window" -and $f7.via -eq "window" -and
+            ($lines -match "MCPKEY 372") -and ($lines -match "MCPKEY 365") -and -not ($lines -match "MCPKEY 56")
+    }
+    Check "game_type sends text input that reaches on_text_input" {
+        $since = (Get-GameLogSince 0).nextLine
+        $t = Get-Json (Invoke-Mcp "game_type" @{ text = "Hi" })
+        Start-Sleep -Milliseconds 800
+        $lines = (Get-GameLogSince $since).lines
+        $t.units -eq 2 -and ($lines -match "MCPTXT 72") -and ($lines -match "MCPTXT 105")
+    }
     Check "stop_game stops the game" { (Get-Json (Invoke-Mcp "stop_game")).stopped -eq $true }
+    Check "a game that calls QuitGame exits within 3 s while the bridge is connected" {
+        $r = Get-Json (Invoke-Mcp "run_game" @{ startRoom = 1 } 300)
+        Start-Sleep -Seconds 4
+        Invoke-Mcp "game_state" | Out-Null # the bridge now holds an open connection
+        Invoke-Mcp "game_call_function" @{ name = "MCP_Quit" } | Out-Null
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        do { Start-Sleep -Milliseconds 200; $s = Get-Json (Invoke-Mcp "game_status") } while ($s.running -and $sw.ElapsedMilliseconds -lt 10000)
+        $sw.Stop()
+        Write-Host ("    exited after {0} ms" -f $sw.ElapsedMilliseconds) -ForegroundColor DarkGray
+        $r.launched -and -not $s.running -and $sw.ElapsedMilliseconds -lt 3000
+    }
 }
 finally {
     if ($Keep) { Write-Host "Left the smoke game open at $Folder (-Keep)." -ForegroundColor Yellow } else { Remove-SmokeGame }

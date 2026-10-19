@@ -48,6 +48,17 @@ namespace AgsMcp.Editor.Engine
             ["del"] = 383,
         };
 
+        /// <summary>
+        /// True for the codes the engine plugin posts to the game window as real keys (WM_KEYDOWN/UP, with the
+        /// extended-key flag for Home..Delete) instead of Game.SimulateKeyPress: Backspace, Tab, Enter (SimulateKeyPress
+        /// reads 1..26 as Ctrl+letters), F1..F12, and Home/Up/PageUp/Left/Right/End/Down/PageDown/Insert/Delete
+        /// (which SimulateKeyPress maps to keypad scan codes, digits with NumLock on). Mirrors kWindowKeys in agsmcp.cpp.
+        /// </summary>
+        public static bool IsWindowRouted(int code) =>
+            code == 8 || code == 9 || code == 13 ||
+            (code >= 359 && code <= 368) || code == 433 || code == 434 ||
+            code == 371 || code == 372 || code == 373 || code == 375 || code == 377 || (code >= 379 && code <= 383);
+
         /// <summary>Resolve a key name to an AGS key code, or throw a ToolException for an unknown key.</summary>
         public static int Resolve(string key)
         {

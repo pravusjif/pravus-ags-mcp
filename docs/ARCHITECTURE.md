@@ -87,6 +87,8 @@ src/AgsMcp.Editor/
 - A worker thread runs a loopback TCP server that accepts line-delimited JSON requests (`{id, cmd, args}`) and **only queues** them.
 - The main thread drains the queue in `AGSE_PRERENDER`, which fires every frame, even during a blocking `Wait`, walk or dialog. `IAGSEngine` access is only safe on the main thread.
 - Each request is a `shared_ptr<Request>` with its own condition variable. The worker waits up to 10 s for the main thread to fill the result, so a timed-out request is never freed while the main thread still uses it.
+- **Shutdown does not wait on the editor.** The editor keeps one connection open, and the worker used to sit in a blocking `recv()` on it, so `AGS_EngineShutdown`'s `join` waited until the editor dropped the connection: a `QuitGame` took 15–90 s. Now accepted sockets get `SO_RCVTIMEO` 500 ms and the receive loop re-checks `g_server_running` on each timeout; `g_listen` and `g_client` are only touched under one mutex. `AGS_EngineShutdown` clears the flag (under the queue lock, so nothing can be queued after it), closes the listener, answers every outstanding request, waits up to 2 s for the worker to send those answers and leave, and only then `shutdown(SD_BOTH)`s and closes the client socket before the `join`.
+- **A command can quit the game from inside its own handler.** `QueueGameScriptFunction` runs the function at once when no script is running, so `call_function MCP_Quit` reached `QuitGame` → `AGS_EngineShutdown` while that very request was being handled; it never returns. The main thread therefore records the request it is handling (`g_current`), and shutdown answers it with `{ok:true, gameExiting:true}` and the queued ones with `"shutting down"`. Measured on the smoke game: exit 175–226 ms after the call, and the call itself gets its answer.
 - Every event handler returns 0, because a non-zero return stops the plugin hook chain.
 - `ENTERROOM`, `LEAVEROOM` and `POSTRESTOREGAME` hooks feed a small recent-events log that `game_state` returns.
 - Editor side: `Engine/EngineClient.cs` is a reconnecting TCP client.
@@ -95,16 +97,17 @@ src/AgsMcp.Editor/
 | Command | Implementation |
 |---|---|
 | `state` | `GetCurrentRoom`, `GetPlayerCharacter`, `GetCharacter(i)`, `GetObject(i)`, `GetMousePosition`, `GetGameOptions` (disabled-UI and cutscene flags), `IsGamePaused`, `IsInterfaceEnabled`, plus the event log. |
-| `screenshot` | `SaveScreenShot("$SAVEGAMEDIR$/agsmcp.bmp")`, path resolved with `ResolveFilePath`. The editor converts the BMP to PNG and returns MCP image content. |
+| `screenshot` | `SaveScreenShot("$SAVEGAMEDIR$/agsmcp-<n>.bmp")` with a fresh `<n>` per shot (a failed save can never return the previous picture; a zero result is an error), path resolved with `ResolveFilePath`. The editor converts the BMP to PNG, deletes the BMP and returns MCP image content. |
 | `click` | `SetMousePosition` then `SimulateMouseClick`. Real SDL input: it reaches `on_mouse_click` and the GUIs, but moves the OS cursor. |
 | `process_click` | `SetActiveInventory` (optional), `SetCursorMode`, `RoomToViewport`, `SetMousePosition`, `SimulateMouseClick(1)`. See below. |
-| `key` | `Game::SimulateKeyPress`, except Backspace, Tab and Enter, which are posted as `WM_KEYDOWN`/`WM_KEYUP` to `GetWindowHandle()`. See below. |
+| `key` | `Game::SimulateKeyPress`, except the window-routed keys (Backspace, Tab, Enter, F1–F12, Home/Up/PageUp/Left/Right/End/Down/PageDown/Insert/Delete), which are posted as `WM_KEYDOWN`/`WM_KEYUP` to `GetWindowHandle()`. Returns `via` (`window` or `SimulateKeyPress`). See below. |
+| `type` | `WM_CHAR` per UTF-16 unit of `text` to `GetWindowHandle()`; SDL turns it into text input, which runs `on_text_input(ch)` (not `on_key_press`; verified with "Hi" → 72, 105) and, by `game_run.cpp`'s key handling, goes to a focused GUI text box first (not verified live). |
 | `hover_name` | `GetLocationName` into a buffer. |
 | `get_global_int` / `set_global_int` | `GetGlobalInt` / `SetGlobalInt`. |
 | `call_function` | `QueueGameScriptFunction` (GlobalScript only, 0–2 int args). The engine drops a call to a missing function silently, so the editor first checks that `GlobalScript.asc` defines it (`ScriptText.DefinesFunction`) and refuses otherwise. |
 
 - **`process_click` queues a real click; it never calls `Room.ProcessClick`.** Commands run inside `AGSE_PRERENDER`. Calling `ProcessClick` there ran blocking handlers (`Display`, `Say`, `Walk eBlock`) as a nested game loop inside the render callback, which timed the request out and wedged later interactions. A queued click makes the game's own `on_mouse_click` run the interaction on the next frame, exactly as for a player.
-- **Backspace, Tab and Enter bypass `SimulateKeyPress`**, because `Game_SimulateKeyPress` (`Engine/ac/game.cpp`) reinterprets codes 1–26 as Ctrl+A..Z. Those keys arrived as Ctrl+H/I/M.
+- **Some keys bypass `SimulateKeyPress`** (the `kWindowKeys` table in `agsmcp.cpp`, mirrored by `KeyMap.IsWindowRouted`). `Game_SimulateKeyPress` (`Engine/ac/game.cpp`) reinterprets codes 1–26 as Ctrl+A..Z, so Backspace, Tab and Enter arrived as Ctrl+H/I/M; and `ags_key_to_sdl_scan` maps Home, the arrows, PageUp/Down, End, Insert and Delete to **numpad** scancodes first, which arrive as digits with NumLock on. Those keys and F1–F12 are posted to the window instead, with the scan code from `MapVirtualKey` in `lParam` bits 16–23 and, for the navigation keys, the **extended-key bit 24**: without it Windows scan codes for the arrows equal the keypad's, and SDL reads them as keypad keys. Verified: `game_key Up` and `F7` reach `on_key_press` as 372 and 365.
 
 ## Subsystems and design decisions
 
@@ -184,7 +187,7 @@ src/AgsMcp.Editor/
 - **`game_state` reports views as the editor and script do** (1-based, 0 = none). The engine stores them 0-based with -1 for none (an object's `0xFFFF` read through the plugin's `short`), like `Character.View`/`Object.View` convert them.
 - **A `Display()` box leaves `interfaceEnabled` at 1**: `DisplayMessageState::Begin()` (`Engine/ac/display.cpp`) does not disable the interface, so `ready` can be met while the box waits for a click. An open dialog option list keeps it at 0, so `ready` times out there.
 - `game_wait_until` has no upper bound on `timeoutMs`, but MCP clients commonly abandon a call after about 60 s; the tool description tells callers to keep waits at 45 s or less and chain them.
-- `game_key` maps names ("Space", "F5", letters, digits, arrows) or raw codes to AGS `eKey` codes (`Engine/KeyMap.cs`).
+- `game_key` maps names ("Space", "F5", letters, digits, arrows) or raw codes to AGS `eKey` codes (`Engine/KeyMap.cs`); the window-routed ones are real key presses (see [Commands](#commands)). Text for GUI text boxes is a separate `game_type`, because a key press is not text input: letters sent as keys never reached a text box.
 
 ## Known gaps
 
@@ -196,7 +199,6 @@ src/AgsMcp.Editor/
 - Game-data, sprite and new-module changes do not refresh the editor's project tree or open panes until the next reload. The audio tools and the audio entity kinds are the exception.
 - `open_project` cannot reopen the game that is already open (`_OpenInEditor.lock`); reloading from disk means restarting the editor.
 - No tool reloads the project from disk. `move_script_module` refuses projects with script folders.
-- `game_key` sends arrows, Home, End, PageUp/Down, Insert and Delete through `SimulateKeyPress`, which pushes them as **numpad** scancodes (`Engine/platform/base/sys_events.cpp`); with NumLock on in the new key-handling mode they can arrive as digits. One project reported Down and F7 arriving as Alt plus a letter, which the code does not explain; not yet reproduced.
 - The editor-debugger named pipes (`--enabledebugger <token>`) are not hosted, so runtime errors come only from the engine log, without call stacks.
 
 ## Testing
