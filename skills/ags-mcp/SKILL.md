@@ -1,6 +1,6 @@
 ---
 name: ags-mcp
-description: Work on the Adventure Game Studio (AGS 3.6) game that is open in the AGS editor through the `ags` MCP server's tools (`project_info`, `get_room`, `game_state`, …; Claude Code shows them as `mcp__ags__*`). Use this whenever the user wants to build, change or fix anything in their AGS game — a room, background, hotspot, object, sprite, animation view, character, inventory item, dialog, puzzle, GUI setting, sound effect, music, script or event — or generate pixel art or sound for it, or check that it works in the running game with the `game_*` tools, even if they just say "add a door here", "give him a key", "make the cat talk" or "does it work?". Also use it when the ags server's tools are available in the session and the task touches the game project.
+description: Work on the Adventure Game Studio (AGS 3.6) game that is open in the AGS editor through the `ags` MCP server's tools (`project_info`, `get_room`, `game_state`, …; Claude Code shows them as `mcp__ags__*`). Use this whenever the user wants to build, change or fix anything in their AGS game — a room, background, hotspot, object, sprite, animation view, character, inventory item, dialog, puzzle, GUI setting, sound effect, music, script or event — or generate pixel art or sound for it, or check that it works in the running game (`game_*` tools) or in a release build (`desktop_*` tools), even if they just say "add a door here", "give him a key", "make the cat talk" or "does it work?". Also use it when the ags server's tools are available in the session and the task touches the game project.
 ---
 
 # Working on an AGS game through the ags MCP server
@@ -72,16 +72,20 @@ Then play the changed interaction in the running game with the `game_*` tools ([
 
 Keep each subagent to one task of about 8–14 checks; a longer run fills its own context and takes far longer. When a test continues a previous one, name the save to load (see playtesting.md) instead of replaying the path to it.
 
+Subagents have the `ags` tools too. Give a subagent edits to make (a dialog rewrite, a pass over every speech line) and have it make them with the tools, rather than return proposals for you to apply.
+
 Ask it to report back briefly: pass or fail for each assertion with the observed values, any `get_game_log` errors, and a description of anything unexpected. It should not paste raw state dumps. Fix failures yourself, then start a new subagent to play the test again.
 
-The `game_*` tools need the `agsmcp` engine plugin enabled in the project. If `project_info` does not list `agsmcp.dll` under `plugins`, tell the user that `runtime_enable_plugin` turns it on for this game (and that they should untick it in the Plugins node before a release build), and enable it only with their agreement.
+The `game_*` tools need the `agsmcp` engine plugin enabled in the project. If `project_info` does not list `agsmcp.dll` under `plugins`, tell the user that `runtime_enable_plugin` turns it on for this game (and that `build_game mode=release` takes it out for a release build), and enable it only with their agreement.
+
+To check the build a player gets, with no plugin and Debug off, use the `desktop_*` tools (`build_game mode=release`, `desktop_run`, `desktop_screenshot`, `desktop_click`/`desktop_key`) in the same kind of subagent; the playtesting reference has that loop. They take over the user's mouse and keyboard focus while they run, so say so first.
 
 ## References
 
 Read each one when you reach that part of the job rather than all up front; they are short but specific.
 
 - [references/tools.md](references/tools.md): every tool with its argument shapes and the quirks that matter. Read it when unsure what a tool takes or returns.
-- [references/scripting.md](references/scripting.md): AGS 3.6 script patterns that work (handlers, inventory, state, dialog scripts, NPC entrances, ambient animated characters) and the usual pitfalls. Read it before writing handlers.
-- [references/playtesting.md](references/playtesting.md): the `game_*` loop: cursor modes, waiting correctly, dismissing message boxes, exact assertions. The play-test subagent reads it before it checks behaviour in the running game.
+- [references/scripting.md](references/scripting.md): AGS 3.6 script patterns that work (handlers, inventory, state, dialog scripts, NPC entrances, ambient animated characters), colour numbers for `set_properties`, and the usual pitfalls (line endings, define-before-use, a stale editor copy). Read it before writing handlers.
+- [references/playtesting.md](references/playtesting.md): the `game_*` loop (cursor modes, waiting correctly, dismissing message boxes, exact assertions), engine and save behaviour that looks like a bug but is not, and the `desktop_*` loop for release builds. The play-test subagent reads it before it checks behaviour in the running game.
 - [references/pixel-art.md](references/pixel-art.md): generating crisp pixel-art backgrounds and sprites with Python/PIL, plus `scripts/pixelart.py`. Read it when you are about to draw.
 - [references/audio.md](references/audio.md): synthesising sound effects, ambience loops and music with numpy, plus `scripts/sfx.py`, and importing them as audio clips. Read it when the game needs sound.

@@ -63,6 +63,50 @@
         "compile reports 0 errors and save_project was called after the imports",
         "The game was run in the user's project and the agent gathered evidence that the handlers ran (no script error in get_game_log after interacting with the hotspot and entering the room)"
       ]
+    },
+    {
+      "id": 5,
+      "prompt": "I'm about to send the game to testers. Build it the way players will get it and check that the release build actually starts and that the first room reacts to the mouse. Don't change the game itself.",
+      "expected_output": "A release build made with build_game mode=release, launched with desktop_run, observed with desktop_screenshot, driven with a real desktop_click (and/or desktop_key) whose effect is shown by a later screenshot or log line, then desktop_stop; the project's scripts and rooms are unchanged, and the user is told about the focus the desktop tools take and which build mode the project was left in.",
+      "files": [],
+      "expectations": [
+        "build_game was called with mode=release (not a plain debug build), and its result reported debugMode false and the engine plugin not enabled",
+        "The game was launched with desktop_run (not run_game) and kept the default software renderer",
+        "At least one desktop_screenshot was taken before and one after an input, and the agent described what changed between them (or cited a get_game_log source=desktop line)",
+        "The input was real input through desktop_click or desktop_key at game coordinates taken from the room data or a screenshot, not a game_* tool",
+        "desktop_stop was called at the end and no game process was left running",
+        "No script, room or entity was changed (no write_script, edit_script, room tool or set_properties call)",
+        "The agent told the user that the desktop tools bring the game window to the front, and either restored the previous mode (build_game mode=debug) or said the project was left in release mode"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Add a small 'Hint' button to the game's main button bar GUI. Clicking it should make the player say a short hint. Check in the running game that clicking it works.",
+      "expected_output": "The GUI and its existing controls were read first, a button created on it with create_gui_control inside the GUI's bounds and not overlapping existing controls, its Click event bound with set_event guicontrol to a GlobalScript handler that makes the player say a hint, compile clean, project saved, and a game_* check that clicks the button and observes the line.",
+      "files": [],
+      "expectations": [
+        "The agent listed the GUIs and read the target GUI's controls (list_gui_controls) before adding anything",
+        "A new button exists on that GUI (list_gui_controls), with a script name, a 'Hint' text or image, and a position inside the GUI that does not overlap another control",
+        "The button's Click event is bound with set_event (type guicontrol) and the GlobalScript handler makes the player say a line",
+        "Game.agf was not edited by hand",
+        "compile reports 0 errors and save_project was called before run_game",
+        "The game was run in the user's project, the agent made the GUI visible if it pops up only on demand, clicked the button with game_click, and gathered evidence of the line (a screenshot taken straight after the click, or a logged marker)"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Each dialog option in my game has to fit on one line of the dialog option list, which is 280 pixels wide. Check every option of every dialog and shorten the ones that don't fit, keeping their meaning.",
+      "expected_output": "Option texts gathered from every dialog (list_strings or get_dialog_script), each measured in pixels with measure_text (or game_text_extent) in the font the options are drawn in, the overflowing ones rewritten shorter through set_dialog_script and measured again, and a report of each changed option with its old and new width.",
+      "files": [],
+      "expectations": [
+        "The agent collected the option texts of every dialog through the tools (list_strings or get_dialog_script), not by reading Game.agf",
+        "Widths were measured in pixels with measure_text or game_text_extent, not estimated from character counts",
+        "The font measured is the one the options are drawn in (the game's normal font, usually 0, unless a custom dialog options renderer uses another), and the agent said which font number it used",
+        "Every option over 280 px was shortened with set_dialog_script (options keep their order and show/say flags) and measured again at 280 px or less",
+        "Options that already fit were left unchanged, and dialog scripts were not otherwise altered",
+        "save_project was called after the changes",
+        "The report lists each changed option with its old and new text and width"
+      ]
     }
   ]
 }
