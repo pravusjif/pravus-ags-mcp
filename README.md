@@ -137,17 +137,19 @@ You need the .NET SDK and the .NET Framework 4.6+ reference assemblies (Visual S
 native engine plugin additionally needs the **C++ CMake tools for Windows** (also from the VS 2022 installer).
 
 First copy `Local.props.example` to `Local.props` and set `AgsDir` to your AGS 3.6 editor folder. `Local.props` is
-git-ignored; MSBuild and `build.ps1` read it, and `-AgsDir` on the command line overrides it. Optionally set
-`SmokeGame` to the `Game.agf` of a throwaway game: `build.ps1 -Run` opens it when no `-Game` is given.
+git-ignored; MSBuild and `build.ps1` read it, and `-AgsDir` on the command line overrides it. `build.ps1 -Run` opens
+a throwaway game when no `-Game` is given: `SmokeGame` from `Local.props` if set, else
+`%LOCALAPPDATA%\AGS-MCP\SmokeGame\Game.agf`, which it creates from the Sierra-style template when it is missing.
 
 ```powershell
 .\build.ps1 -Test                    # build the editor plugin + run unit tests
 .\build.ps1 -Engine                  # build the native engine plugin (agsmcp.dll, x86) with CMake
-.\build.ps1 -Engine -Deploy -Run     # build both, copy into AgsDir, start the editor (opens -Game <Game.agf>, else SmokeGame)
+.\build.ps1 -Engine -Deploy -Run     # build both, copy into AgsDir, start the editor (opens -Game <Game.agf>, else the smoke game)
 .\build.ps1 -Engine -Package         # build both and zip a release into dist\
 ```
 
-The editor locks plugin DLLs, so close it before you deploy (`-StopEditor` closes it for you, but any unsaved work is lost).
+The editor locks plugin DLLs, so close it before you deploy (`-StopEditor` closes it for you: it saves the open game through the MCP server, then kills the editor, so
+work is lost only when the server cannot answer).
 
 ### Releasing
 
@@ -264,8 +266,8 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 - **Smoke test:** `tests\smoke\smoke.ps1` drives a live editor through every tool group over HTTP on a throwaway
   game it creates from the Sierra-style template (compile error and fix, a property round-trip, room authoring,
   `render_room`, `import_sprite`, the audio tools, `build_game`, `run_game`, `game_*`), then reopens the game you had open and
-  deletes the throwaway one. Run it after `build.ps1 -Engine -Deploy -Run -Game <Game.agf>` (or with `SmokeGame` set in
-  `Local.props`): with no game open, the editor's start-up dialog refuses every tool call.
+  deletes the throwaway one. Run it after `build.ps1 -Engine -Deploy -Run`, which opens `-Game` or the smoke game: with no game open, the
+  editor's start-up dialog refuses every tool call.
 
 ## Layout
 

@@ -5,7 +5,7 @@
 
 .DESCRIPTION
   Requires the AGS editor running with the MCP server up and a game open (build.ps1 -Engine -Deploy -Run
-  opens -Game <Game.agf>, else SmokeGame from Local.props). The engine plugin (agsmcp.dll) must be
+  opens -Game <Game.agf>, else the smoke game, see tools/SmokeGame.ps1). The engine plugin (agsmcp.dll) must be
   deployed next to AGSEditor.exe so runtime_enable_plugin can find it.
 
   The test creates a new game from the Sierra-style template in a temp folder (create_project), runs

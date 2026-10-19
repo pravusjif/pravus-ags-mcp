@@ -8,7 +8,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 
 ## Checklist
 
-- [ ] 1. Housekeeping: installer repo name, package hygiene, `SmokeGame` setting, headless-compile fallback in the skill — **BLOCKED on the owner (2026-10-19):** everything but the live gate landed in "Housekeeping: installer repo name, SmokeGame, package hygiene, headless compile"; open: set `SmokeGame` in `Local.props`, then run `.\build.ps1 -Deploy -StopEditor -Run` and call `project_info` (not run unattended: the editor held a non-throwaway project that `-StopEditor` would kill).
+- [ ] 1. Housekeeping: installer repo name, package hygiene, `SmokeGame` setting, headless-compile fallback in the skill — everything but the live gate landed in "Housekeeping: installer repo name, SmokeGame, package hygiene, headless compile"; open: run `.\build.ps1 -Deploy -StopEditor -Run` and call `project_info` (decision 16 removed the owner blockers).
 - [ ] 2. Script hygiene: CRLF everywhere, `staleOnDisk` detection, `reload_script`
 - [ ] 3. `batch` tool and `outPath` on the image tools
 - [ ] 4. `list_sprites`, `create_sprite_folder`, `move_script_module`
@@ -28,7 +28,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 
 - **Project-agnostic.** Nothing added may name a particular game, its rooms, characters, scripts or sprite numbers, nor any machine path. Machine paths come only from the git-ignored `Local.props` or from tool arguments; examples use neutral names (`roomN`, `cPlayer`, `<game>`). This restates `AGENTS.md`: "Don't add references to specific games."
 - `AGENTS.md` constraints: C# 7.3, net46, one DLL (`Private=false`), schemas with one typed form (no `anyOf`/`oneOf`/`$ref`), editor internals only in `src/AgsMcp.Editor/EditorInternals.cs`, bad input throws `ToolException`, UI-thread tools through `UiDispatcher` (`RunOnUiThread=false` only for tools that never touch the editor model).
-- Dev loop: `.\build.ps1 -Test -Deploy -StopEditor -Run` (add `-Engine` for C++ milestones; needs VS 2022 with the C++ CMake tools). With no game open every tool call is refused: `-Run` opens `SmokeGame` from `Local.props` when `-Game` is absent (the owner sets the value). If `SmokeGame` is unset, end the turn `BLOCKED`. Check first: `. .\tools\LocalProps.ps1; Get-LocalProp SmokeGame`, and `Get-Process AGSEditor | Select MainWindowTitle` for an open project `-StopEditor` would kill (decision 14).
+- Dev loop: `.\build.ps1 -Test -Deploy -StopEditor -Run` (add `-Engine` for C++ milestones; needs VS 2022 with the C++ CMake tools). With no game open every tool call is refused: `-Run` opens the smoke game when `-Game` is absent (`SmokeGame` from `Local.props`, else `%LOCALAPPDATA%\AGS-MCP\SmokeGame\Game.agf`, created from a template when missing), and `-StopEditor` saves whatever game is open through `save_project` before it kills the editor (decision 16). Neither needs the owner: never end a turn `BLOCKED` over `SmokeGame` or an open editor.
 - **Gate** = unit tests green (`.\build.ps1 -Test`) **and** the milestone's named `tests/smoke/smoke.ps1` checks pass against the live editor, with the observed output quoted in the progress log. Smoke checks are `Check "label" { ... }` blocks using `Invoke-Mcp`/`Get-Json`/`Has-Image`; the smoke game is throwaway, so temporary script hooks are allowed there.
 - **Docs in the same commit:** `README.md#tools` row(s), `skills/ags-mcp/references/tools.md` row(s), `docs/ARCHITECTURE.md` (the behaviour section, Known gaps, and any newly verified AGS fact in "AGS reference").
 - The skill stays client-neutral (tool names without a client prefix) and never names a particular game.
@@ -48,8 +48,9 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 11. No post-install connection check in `install.ps1` (it refuses while the editor runs); its Next steps print a `GET http://127.0.0.1:7471/` check instead.
 12. Text into GUI text boxes is a separate `game_type text` (WM_CHAR), not an overload of `game_key`.
 13. (2026-10-19) A gate's "Select-String over the repo" means tracked files: git-ignored local files (`.vscode`, `skills/ags-mcp-workspace`, `.ai-loop` logs) are the owner's and are left as they are.
-14. (2026-10-19) An unattended session never runs `-StopEditor` while the editor has a project open that is not `SmokeGame` or a smoke temp game: it can lose the owner's unsaved work. It ends `BLOCKED` instead.
+14. (2026-10-19) Superseded by 16.
 15. (2026-10-19) `tools/LocalProps.ps1` needed no change: `Get-LocalProp` reads any element, so `SmokeGame` is read with `Get-LocalProp SmokeGame` in `build.ps1`.
+16. (2026-10-19, owner) Live gates never block on the owner. `SmokeGame` is optional: `tools/SmokeGame.ps1` defaults it to `%LOCALAPPDATA%\AGS-MCP\SmokeGame\Game.agf` and creates it by extracting the Sierra-style `.agt`. `build.ps1 -StopEditor` calls `save_project` on the running server, then kills the editor whatever project is open, even when the save fails. An unattended session may run `-StopEditor` with any project open and may leave the smoke game open afterwards.
 
 ## Verified facts (AGS 3.6.2.21 source and this repo)
 
@@ -148,7 +149,7 @@ Gate: the full `smoke.ps1` passes (pass/fail counts quoted); the zip exists; the
 
 ## Risks
 
-- C++ milestones (9–11) need VS 2022 + CMake and a closed editor for `-Deploy`; `-StopEditor` discards unsaved editor work.
-- The smoke test needs the editor open with a game (`SmokeGame`); milestones 12–13 need an interactive, unlocked desktop (focus theft, DPI scaling); D3D/OpenGL windows read black through `CopyFromScreen`.
+- C++ milestones (9–11) need VS 2022 + CMake and a closed editor for `-Deploy`; `-StopEditor` saves the open game over MCP first, but discards unsaved work when the server cannot answer (a modal dialog, a hung editor).
+- The smoke test needs the editor open with a game (the smoke game); milestones 12–13 need an interactive, unlocked desktop (focus theft, DPI scaling); D3D/OpenGL windows read black through `CopyFromScreen`.
 - `game_run_interaction` for hotspots depends on the hotspot being uncovered by the player sprite; it refuses rather than mis-clicking.
 - Save-first in `build_game` (decision 9) changes behaviour callers may rely on; recorded in ARCHITECTURE.

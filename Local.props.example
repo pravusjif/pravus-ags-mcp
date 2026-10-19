@@ -16,7 +16,9 @@
 
     <!-- A Game.agf that build.ps1 -Run opens when no -Game is passed, so the MCP tools (which refuse
          every call while no game is open) and tests/smoke/smoke.ps1 have a project to start from.
-         Use a throwaway game: the smoke test saves it before it creates its own. Optional. -->
+         Use a throwaway game: the smoke test saves it before it creates its own. Optional: the default
+         is %LOCALAPPDATA%\AGS-MCP\SmokeGame\Game.agf, and -Run creates the file from the Sierra-style
+         template when it is missing. -->
     <SmokeGame>C:\ags-games\McpSmoke\Game.agf</SmokeGame>
   </PropertyGroup>
 </Project>
