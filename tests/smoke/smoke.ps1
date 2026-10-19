@@ -4,8 +4,9 @@
   over HTTP, on a throwaway game it creates itself.
 
 .DESCRIPTION
-  Requires the AGS editor running with the MCP server up (build.ps1 -Engine -Deploy -Run). The engine
-  plugin (agsmcp.dll) must be deployed next to AGSEditor.exe so runtime_enable_plugin can find it.
+  Requires the AGS editor running with the MCP server up and a game open (build.ps1 -Engine -Deploy -Run
+  opens -Game <Game.agf>, else SmokeGame from Local.props). The engine plugin (agsmcp.dll) must be
+  deployed next to AGSEditor.exe so runtime_enable_plugin can find it.
 
   The test creates a new game from the Sierra-style template in a temp folder (create_project), runs
   every check against it, then reopens the game that was open before and deletes the temp game. No

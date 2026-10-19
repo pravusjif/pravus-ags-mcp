@@ -13,5 +13,10 @@
     <!-- Unpacked AGS source tree (ags_3.6.2.21_source.zip), for looking up editor and engine
          internals. Optional; nothing reads it automatically. -->
     <AgsSourceDir>C:\ags-src\ags_3.6.2.21_source</AgsSourceDir>
+
+    <!-- A Game.agf that build.ps1 -Run opens when no -Game is passed, so the MCP tools (which refuse
+         every call while no game is open) and tests/smoke/smoke.ps1 have a project to start from.
+         Use a throwaway game: the smoke test saves it before it creates its own. Optional. -->
+    <SmokeGame>C:\ags-games\McpSmoke\Game.agf</SmokeGame>
   </PropertyGroup>
 </Project>

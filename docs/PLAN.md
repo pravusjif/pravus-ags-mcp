@@ -1,0 +1,154 @@
+# Plan: lessons from a shipped game (0.1.3 → 0.2.0)
+
+Run with AI Plan Loop: `python <ai-plan-loop>\plan_loop.py <repo>\docs\PLAN.md` (the log is `docs/PLAN.progress.md`, next to this file). Read `AGENTS.md` and `docs/ARCHITECTURE.md` first. The AGS 3.6.2.21 source for API lookups is `AgsSourceDir` in `Local.props`; source paths below are relative to it. The tool reference is `README.md#tools` and `skills/ags-mcp/references/tools.md`.
+
+## Why
+
+A complete game was built through this server. Its project accumulated ~40 helper scripts, each filling a gap in the server: release builds tested by real Win32 input because the `game_*` tools need the runtime plugin and Debug mode; a raw JSON-RPC client for bulk passes; font files patched by hand; text widths re-measured from WFN files; `Game.agf` patched for GUI controls and module order; the editor's stale in-memory copy of a script compiled over a disk edit; LF/CRLF rewrites from `set_dialog_script`. This plan moves each of those into the server or the skill.
+
+## Checklist
+
+- [ ] 1. Housekeeping: installer repo name, package hygiene, `SmokeGame` setting, headless-compile fallback in the skill — **BLOCKED on the owner (2026-10-19):** everything but the live gate landed in "Housekeeping: installer repo name, SmokeGame, package hygiene, headless compile"; open: set `SmokeGame` in `Local.props`, then run `.\build.ps1 -Deploy -StopEditor -Run` and call `project_info` (not run unattended: the editor held a non-throwaway project that `-StopEditor` would kill).
+- [ ] 2. Script hygiene: CRLF everywhere, `staleOnDisk` detection, `reload_script`
+- [ ] 3. `batch` tool and `outPath` on the image tools
+- [ ] 4. `list_sprites`, `create_sprite_folder`, `move_script_module`
+- [ ] 5. GUI controls: list/create/delete, `guicontrol` entity kind, GUI events in `set_event`
+- [ ] 6. Engine-plugin toggle, `build_game`/`run_game` modes, `project_info` state, run robustness
+- [ ] 7. Fonts: `create_entity font`, `import_font`
+- [ ] 8. Text tooling: `measure_text` (WFN parser) and `list_strings`
+- [ ] 9. Engine plugin robustness: clean shutdown, reliable keys, `game_type`, unique screenshot files
+- [ ] 10. Engine reach: `game_text_extent`, `game_call_function roomScript`, `game_run_interaction`
+- [ ] 11. Screenshot bursts and log-line waits
+- [ ] 12. Desktop driver, part 1: `desktop_run/status/stop/screenshot`, `get_game_log source`
+- [ ] 13. Desktop driver, part 2: `desktop_click/key/type`
+- [ ] 14. Skill update: tools.md, playtesting.md, scripting.md, SKILL.md, evals
+- [ ] 15. Release 0.2.0: docs sweep, Known-gaps reconciliation, version bump
+
+## Rules for every milestone
+
+- **Project-agnostic.** Nothing added may name a particular game, its rooms, characters, scripts or sprite numbers, nor any machine path. Machine paths come only from the git-ignored `Local.props` or from tool arguments; examples use neutral names (`roomN`, `cPlayer`, `<game>`). This restates `AGENTS.md`: "Don't add references to specific games."
+- `AGENTS.md` constraints: C# 7.3, net46, one DLL (`Private=false`), schemas with one typed form (no `anyOf`/`oneOf`/`$ref`), editor internals only in `src/AgsMcp.Editor/EditorInternals.cs`, bad input throws `ToolException`, UI-thread tools through `UiDispatcher` (`RunOnUiThread=false` only for tools that never touch the editor model).
+- Dev loop: `.\build.ps1 -Test -Deploy -StopEditor -Run` (add `-Engine` for C++ milestones; needs VS 2022 with the C++ CMake tools). With no game open every tool call is refused: `-Run` opens `SmokeGame` from `Local.props` when `-Game` is absent (the owner sets the value). If `SmokeGame` is unset, end the turn `BLOCKED`. Check first: `. .\tools\LocalProps.ps1; Get-LocalProp SmokeGame`, and `Get-Process AGSEditor | Select MainWindowTitle` for an open project `-StopEditor` would kill (decision 14).
+- **Gate** = unit tests green (`.\build.ps1 -Test`) **and** the milestone's named `tests/smoke/smoke.ps1` checks pass against the live editor, with the observed output quoted in the progress log. Smoke checks are `Check "label" { ... }` blocks using `Invoke-Mcp`/`Get-Json`/`Has-Image`; the smoke game is throwaway, so temporary script hooks are allowed there.
+- **Docs in the same commit:** `README.md#tools` row(s), `skills/ags-mcp/references/tools.md` row(s), `docs/ARCHITECTURE.md` (the behaviour section, Known gaps, and any newly verified AGS fact in "AGS reference").
+- The skill stays client-neutral (tool names without a client prefix) and never names a particular game.
+
+## Decisions
+
+1. Plan here, log in `docs/PLAN.progress.md` (owner).
+2. Release testing = cheap toggle (`runtime_disable_plugin`, `build_game mode`) **and** an in-server Win32 desktop driver (`desktop_*`) that drives any AGS exe by real input without the plugin (owner).
+3. Text measurement = server-side WFN parser (`measure_text`; TTF refused) **and** engine `text_extent` via `IAGSEngine::GetTextExtent` (owner).
+4. Version 0.2.0 is the last milestone (owner).
+5. No array forms on `import_sprite`/`replace_sprite`: `batch` makes every tool bulk-capable while each schema keeps one typed form.
+6. No separate `replace_font`: `import_font id path` replaces that slot's file; `create_entity font` makes a new slot as a copy of an existing font, as the editor does.
+7. `list_strings` walks the model itself, mirroring `TextProcessingHelper`, instead of implementing `IGameTextProcessor`: the processor callback carries no source, `Script` text arrives as whole files, and the room walk lives in a private `RoomsComponent` handler. Rooms are opt-in (`rooms=true`) through `RoomSession`.
+8. `game_run_interaction` is a **queued click** at a point computed from editor data and confirmed with `hover_name`; it never calls `ProcessClick` inside PRERENDER, and refuses when no sampled point reports the target.
+9. `build_game`/`run_game` save first and honour `NeedsRebuildForDebugMode()`, as the editor's own Build command does. This is a behaviour change; record it in ARCHITECTURE.
+10. No `scripts/mcp_client.py` in the skill: `batch` and the smoke test's `Invoke-Mcp` cover raw access.
+11. No post-install connection check in `install.ps1` (it refuses while the editor runs); its Next steps print a `GET http://127.0.0.1:7471/` check instead.
+12. Text into GUI text boxes is a separate `game_type text` (WM_CHAR), not an overload of `game_key`.
+13. (2026-10-19) A gate's "Select-String over the repo" means tracked files: git-ignored local files (`.vscode`, `skills/ags-mcp-workspace`, `.ai-loop` logs) are the owner's and are left as they are.
+14. (2026-10-19) An unattended session never runs `-StopEditor` while the editor has a project open that is not `SmokeGame` or a smoke temp game: it can lose the owner's unsaved work. It ends `BLOCKED` instead.
+15. (2026-10-19) `tools/LocalProps.ps1` needed no change: `Get-LocalProp` reads any element, so `SmokeGame` is read with `Get-LocalProp SmokeGame` in `build.ps1`.
+
+## Verified facts (AGS 3.6.2.21 source and this repo)
+
+- **Plugins** (`Editor/AGS.Editor/Components/PluginsComponent.cs`): private `List<NativePlugin> _plugins`; `BeforeSaveGame` rebuilds `Game.Plugins` from the enabled entries; `RefreshDataFromGame` re-enables from `Game.Plugins`; private `RepopulateTreeView()` redraws the tree icons. `NativePlugin.Enabled=false` calls the DLL's `AGS_EditorShutdown`. `BuildTargetWindows.CopyPlugins` copies enabled DLLs into `Compiled\Windows` and never deletes, so a stale `agsmcp.dll` must be removed by us. `EditorInternals.EnableEnginePlugin` (reflection over `_plugins`) is the template for the disable path.
+- **Build** (`BuildCommandsComponent.CompileGame`): `forceRebuild = NeedsRebuildForDebugMode() || forceRebuild; if (SaveGameFiles()) CompileGame(forceRebuild, false)`. `NeedsRebuildForDebugMode` compares `Settings.DebugMode` with `WorkspaceState.LastBuildConfiguration` and updates it. The server's `EditorInternals.CompileGameFull` currently skips both calls. "Failed to delete an old file" comes from `TryDeleteFile` in the build targets; "EndUpdateResource … 0000006E" from `AGS.Native/agsicons.cpp` patching the icon of a still-locked exe. Data file: `Compiled\Data\<BaseGameFileName>.ags`.
+- **Scripts**: `Script.LoadFromDisk()` re-reads `FileName` with the game's `TextEncoding` and clears `Modified` (never called by the server today). `ScriptsAndHeaders.MoveScriptAndHeaderUp/Down(ScriptAndHeader)` move by one in the flat list only. `Dialog.ToXml` writes `Script` with `WriteCData` verbatim, and CRLF inside CDATA reads back as LF. `ScriptTools.Save` forces CRLF; `set_dialog_script` and `set_event` do not go through it.
+- **GUI controls**: `GUI.Controls` is `List<GUIControl>` `[Browsable(false)]`; `GUI.DeleteControl` removes and decrements higher IDs. `GUIEditor.CreateNewControl` recipe: `new GUIButton/GUILabel/GUITextBox/GUIListBox/GUISlider/GUIInventory(x,y,w,h)`, `Name = GetFirstAvailableScriptName(c.ControlType)`, `ZOrder = ID = gui.Controls.Count`, `Parent = gui`, `gui.Controls.Add(c)`, `game.NotifyClientsGUIControlAddedOrRemoved(gui, c)` (public). Event properties carry `[ScriptFunctionParameters]`: `GUIButton.OnClick` and `NormalGUI.OnClick` (`GUIControl *control, MouseButton button` / `GUI *theGui, MouseButton button`), `GUIListBox.OnSelectionChanged`, `GUITextBox.OnActivate`, `GUISlider.OnChange` (`GUIControl *control`).
+- **Fonts** (`FontsComponent.cs`, `NativeProxy.cs`, `AGS.Types/Font.cs`): new font = `new Font{ID=Fonts.Count, Name="Font N", OutlineStyle=None, PointSize and SourceFilename from the copied font, ProjectFilename="agsfnt{ID}"+ext, TTFMetricsFixup=Settings.TTFMetricsFixup}`, `Fonts.Add`, copy `agsfnt{from}.wfn|ttf` → `agsfnt{to}` with `File.Copy` (the editor's `Utilities.CopyFont` lives in an **internal** class), `NativeProxy.OnFontAdded(game,id)`, `FontTypeConverter.SetFontList(game.Fonts)` (public). TTF import: copy to `agsfnt{id}.ttf`, delete the `.wfn`, `NativeProxy.ReloadFont(id)`, `PointSize = FindTTFSizeForHeight(file, px)` when a pixel height is given (else 10), `SizeMultiplier=1`, `ProjectFilename=TTFFileName`. WFN import: copy to `.wfn`, delete the `.ttf`, `ReloadFont`, `PointSize=0`. Both end with `OnFontUpdated(game,id,true)`. Font files are relative to the game folder (the editor's working directory). `NativeProxy` is internal: reach it by reflection as `EditorInternals` already does for sprites.
+- **WFN** (`Common/font/wfnfont.cpp`, `wfnfontrenderer.cpp`, `fonts.cpp`): signature `"WGT Font File  "` (15 bytes), `u16 table_addr` at offset 15, `char_count=(size-table_addr)/2`, `u16` glyph offsets (0 = no glyph), glyph record `{u16 w, u16 h, ((w+7)/8)*h bytes}`. Line width = Σ glyph widths × `SizeMultiplier`; height = max glyph height × multiplier; an automatic outline adds `2*AutoOutlineThickness`; an outline *font* takes `max(self, outline)`. `split_lines`: `maxWidth -= 1`, `[` is a line break (`\[` literal), break at the last space, else inside the word; line step = `LineSpacing` (0 → font height).
+- **Engine plugin API** (`Engine/plugin/agsplugin.h` v30): `GetTextExtent(font, text, &w, &h)`; `QueueGameScriptFunction(name, globalScript=0, …)` runs the function in the **room** script, at once when no script is running; `SaveScreenShot` picks the format from the extension. No `RunInteraction`/`ProcessClick` and no `AGSE_FINALSHUTDOWN` in this version. The script alive timer is `ccSetScriptAliveTimer(1000/60, 1000, 150000)` (`Engine/game/game_init.cpp`): a script that loops 150000 times without yielding is aborted. `RestoredSaveInfo::GUIControlCount` exists (`savegame.cpp`); "reads 0" was reported by a project, not verified.
+- **Keys**: `Game_SimulateKeyPress` → `ags_key_to_sdl_scan` maps Home/arrows/PgUp/PgDn/End/Ins/Del to the **NumPad** scancode first, and with NumLock on they become digits; codes 1–26 are Ctrl+letters, 301+ are Alt+letters. The plugin's `post_window_key` never sets the extended-key bit (`lParam` bit 24).
+- **Shutdown**: `AGS_EngineShutdown` closes the listening socket and `join`s the worker, which may be blocked in `recv()` on the persistent client connection (no `SO_RCVTIMEO`, no `shutdown()` of the client socket); a request arriving during shutdown waits the full 10 s because PRERENDER no longer drains the queue. This is the probable cause of the 15–90 s Quit a project reported.
+- **Text extraction** (`Editor/AGS.Editor/TextProcessing/`): `TextProcessingHelper.ProcessAllGameText(IGameTextProcessor, Game, CompileMessages)` (public) covers the game name, dialog options and scripts, module scripts, custom-property defaults, GUI labels and buttons, `Character.RealName`, `InventoryItem.Description`, `GlobalMessages`, then fires `ProcessAllGameTexts`; `RoomsComponent` answers it by loading **every** room (unloading the current one) for room scripts, messages, hotspot and object descriptions. `GameTextType {Unknown, Script, DialogScript, Message, DialogOption, ItemDescription}`.
+- **Server**: HTTP bodies up to 64 MB; UI-thread tools are serialised by the dispatcher gate, non-UI tools run concurrently; `tools/call` refuses undeclared top-level keys. `McpServer` handles a JSON-RPC array body item by item. Component IDs: `Plugins`, `Fonts`, `GUIs`, `Scripts`, `Rooms`, `AudioNew`. Tool pattern: `new Tool { Name, Description, InputSchema = Schema.Object().Required(..).Optional(..).Build(), Annotations, Timeout, Handler }`, groups registered in `McpComponent.cs`; unit tests use pure `internal static` helpers and `McpServer` with `DirectExecutor`.
+
+## Milestones
+
+### 1. Housekeeping
+Scope: `install.ps1` `-Repo` default and both `irm` examples → `pravusjif/pravus-ags-mcp` (the README and `AGENTS.md` remote already say so); `build.ps1 -Package` excludes `__pycache__`; `Local.props.example`, `tools/LocalProps.ps1` and `build.ps1 -Run` gain optional `SmokeGame` (a `Game.agf` opened when `-Game` is absent), mentioned in `README.md`, `AGENTS.md` and the smoke header; skill `tools.md` and `SKILL.md` gain the "server unreachable" fallback: `AGSEditor.exe <Game.agf> /compile` (fails while the project is open in the editor; compiler errors print only when stdout is redirected).
+Files: `install.ps1`, `build.ps1`, `tools/LocalProps.ps1`, `Local.props.example`, `README.md`, `AGENTS.md`, `tests/smoke/smoke.ps1`, skill files.
+Tests: none new; `.\build.ps1 -Test` green.
+Gate: `Select-String ags-mcp-api` over the repo returns nothing; `build.ps1 -Engine -Package` zip listing has no `__pycache__`; `build.ps1 -Deploy -StopEditor -Run` opens `SmokeGame` and `project_info` answers.
+
+### 2. Script hygiene
+Scope: `set_dialog_script` stores `ScriptText.NormalizeNewlines(script, "\r\n")`; `set_event` saves through a shared `ScriptTools.Save` (make it `internal static`); new `reload_script name` (module: `Header.LoadFromDisk()` + `Script.LoadFromDisk()`, `Modified=false`, `RebuildAutocompleteCache`, `NotifyScriptChanged`; room `roomN`: `UnloadScript()` + `LoadScript()` on the `UnloadedRoom`, refusing if that room is the editor's loaded room with unsaved changes); `read_script` and `compile` add `staleOnDisk` (disk text ≠ `Script.Text` after newline normalisation; pure `ScriptText.SameIgnoringNewlines`).
+Files: `Tools/ScriptTools.cs`, `Tools/ScriptText.cs`, `Tools/GameDataTools.cs`.
+Tests: unit `SameIgnoringNewlines` (CRLF vs LF, trailing newline). Smoke: `set_dialog_script` with LF → `get_dialog_script` text has no bare LF; write a module on disk with `Set-Content` → `read_script` `staleOnDisk=true` → `reload_script` → text equals disk and `staleOnDisk=false`.
+Docs: ARCHITECTURE "Persistence model" (a stale copy is now detectable and reloadable); remove the line-endings Known gap.
+
+### 3. `batch` and `outPath`
+Scope: `McpServer.InvokeTool(name, JObject args) → ToolResult` reusing the unknown-argument check and the executor; `Tools/BatchTools.cs` `batch calls:[{name, arguments}] [stopOnError=true]`, `RunOnUiThread=false`, 10-minute timeout, refuses a nested `batch`, returns `{results:[{name, ok, content|error}], stopped}`; image content is replaced by `"<image omitted, N bytes; use outPath>"`. `outPath` (absolute file path) on `render_room`, `get_sprite`, `game_screenshot`: write the PNG, return `{path, width, height}` text only.
+Files: `Mcp/McpServer.cs`, `Tools/BatchTools.cs` (new), `McpComponent.cs`, `Tools/RoomTools.cs`, `Tools/AssetTools.cs`, `Tools/GameTools.cs`.
+Tests: unit with `DirectExecutor`: batch of `echo, boom, echo` with `stopOnError` true and false; unknown tool inside a batch; image stripping. Smoke: `batch` of `project_info` + `list_rooms`; `render_room outPath` writes a file larger than 0 bytes.
+Docs: ARCHITECTURE "MCP transport" (batch semantics, one UI-thread call at a time), README and tools.md rows.
+
+### 4. Sprite folders and module order
+Scope: `list_sprites [folder] [flat=false]` → folder tree with `{number, width, height, colorDepth, alphaChannel}` (`SpriteFolder.Sprites/SubFolders`, `GetAllSpritesFromAllSubFolders` for flat); `create_sprite_folder name [parent]` (`new SpriteFolder(name)`, `parent.SubFolders.Add`, names kept unique, `RootSpriteFolder.NotifyClientsOfUpdate()` best-effort on the main form); `move_script_module name direction=up|down|index [index]` using `MoveScriptAndHeaderUp/Down` repeatedly, refusing GlobalScript and projects with script subfolders (flat list and folder would diverge), setting `FilesAddedOrRemoved`.
+Files: `Tools/AssetTools.cs`, `Tools/ScriptTools.cs`.
+Tests: unit: a pure `ModuleOrder.Plan(count, from, direction, index)` step counter. Smoke: create a folder, import a sprite into it, `list_sprites` shows it there; `create_script_module` then `move_script_module` to index 0 and `list_scripts` reflects the order.
+Docs: remove the sprite-folder and reorder Known gaps; ARCHITECTURE Scripts caveat on subfolders.
+
+### 5. GUI controls
+Scope: `EntityKind` gains an optional `ResolveId(Game, string)`; new kind `guicontrol` (id `gui:control`, each side a name or index; `IdOf="<guiId>:<ctrlId>"`, `NameOf="<guiName>:<ctrlName>"`), so `get_properties`/`set_properties` work on controls. `Tools/GuiTools.cs`: `list_gui_controls gui`, `create_gui_control gui type=button|label|textbox|listbox|slider|inventory [x y width height] [properties]` (the verified `GUIEditor` recipe; defaults 0,0,40,20; then `ApplyProperties`), `delete_gui_control gui control` (`gui.DeleteControl`, notify). `set_event` accepts `gui` (OnClick) and `guicontrol` (the control's event property found by `[AGSEventProperty]`, stub parameter list from `[ScriptFunctionParameters]`), stub into GlobalScript via `ScriptTools.Save`.
+Tests: unit `GuiControlRef.Parse` (`"gMain:btnOk"`, `"2:0"`, bad forms). Smoke: create a button on a template GUI, `set_properties guicontrol … {Text}`, `get_properties` reads it back, `set_event guicontrol` adds `<name>_OnClick` to GlobalScript, `compile` ok, delete it.
+Docs: remove the GUI-controls Known gap; ARCHITECTURE Game data.
+
+### 6. Plugin toggle, build modes, run robustness
+Scope: `EditorInternals.DisableEnginePlugin` (set `Enabled=false`, remove from `Game.Plugins`, call `RepopulateTreeView` by reflection, best-effort) and `EnginePluginState{available, enabled}`; `runtime_disable_plugin`; `CompileGameFull(forceRebuild)` becomes editor-parity: `forceRebuild |= NeedsRebuildForDebugMode(); if (!SaveGameFiles()) throw`; `build_game`/`run_game` gain `mode=debug|release` (release: disable the plugin, `Settings.DebugMode=false`, build, delete a stale `Compiled\Windows\agsmcp.dll`; debug: enable if available, `DebugMode=true`); omitted = unchanged. `project_info` adds `debugMode`, `enginePlugin{available, enabled}`. Robustness: `WaitUntilWritable` over every file in `Compiled\Windows` and the `.ags` data file; kill lingering processes whose `MainModule.FileName` equals the exe (guarded); retry the build once after 1 s when a message contains "Failed to delete" or "EndUpdateResource".
+Files: `EditorInternals.cs`, `Tools/GameTools.cs`, `Tools/BuildRunTools.cs`, `Tools/ProjectTools.cs`.
+Tests: unit `BuildRunTools.ShouldRetryBuild(messages)`. Smoke: `build_game mode=release` → no `agsmcp.dll` in `Compiled\Windows`, `project_info.debugMode=false`, plugins empty; `mode=debug` restores both; `run_game` twice in a row launches cleanly.
+Docs: ARCHITECTURE "Build and run" (save-first, decision 9) and "Player simulation" (the disable tool exists); README "Player simulation".
+
+### 7. Fonts
+Scope: the `font` kind gets `Create` (copy of `properties.CopyFrom` or font 0, per the verified recipe; `EditorInternals.OnFontAdded/OnFontUpdated/ReloadFont/FindTTFSizeForHeight` by reflection on `NativeProxy`; refresh the `Fonts` component tree best-effort; `FontTypeConverter.SetFontList`). `import_font id path [height] [pointSize]` in `Tools/AssetTools.cs` (TTF/WFN recipe; other extensions refused). Returns `{id, projectFile, pointSize, height}`.
+Tests: unit `FontImport.Classify(path)` (ttf/wfn/other). Smoke: `create_entity font` → `list_entities font` count +1 and `agsfnt<N>.*` exists; `import_font` with a copy of the template's font 0 file → `ProjectFilename` updated.
+Docs: remove the fonts Known gap; ARCHITECTURE Assets and AGS reference (font recipe).
+
+### 8. Text tooling
+Scope: `Tools/WfnFont.cs` (pure): `Parse(byte[])`, `MeasureLine`, `Wrap(text, maxWidth, sizeMultiplier)` implementing the verified rules (`[` break, `\[` literal, `maxWidth-1`, space then in-word split, outline `+2×thickness` when `OutlineStyle` is automatic). `measure_text font text [maxWidth]` reads `<game>\agsfnt{id}.wfn`, refuses TTF with "use game_text_extent", returns `{width, height, lineSpacing, lines:[{text, width}]}`. `list_strings [type] [rooms=false] [limit] [offset]` in `Tools/TextTools.cs`: mirrors the verified walk with `{text, type, source}`; `Script`/`DialogScript` sources yield string literals via a pure `ScriptText.ExtractStringLiterals` (skips comments, handles escapes); `rooms=true` opens each room through `RoomSession.Open` (documented side effect: it changes the loaded room).
+Tests: unit: a synthetic 3-glyph WFN built in the test (widths 5/2/6): `"AB"` → 11, wrap at 8 → 2 lines, `[` → 2 lines, `\[` literal; `ExtractStringLiterals` with escapes and comments. Smoke: `measure_text 0 "Hello"` width > 0; `list_strings type=DialogOption` lists the smoke dialog's options.
+Docs: ARCHITECTURE AGS reference (WFN format) and Game data.
+
+### 9. Engine plugin robustness (C++)
+Scope in `src/AgsMcp.Engine/agsmcp.cpp`: `std::mutex` guarding `g_listen` and a new `g_client`; accepted sockets get `SO_RCVTIMEO` 500 ms and `handle_client` loops on `g_server_running`, ignoring `WSAETIMEDOUT`; `AGS_EngineShutdown` sets the flag, `shutdown(SD_BOTH)` + `closesocket` on both sockets, fails every queued request with `"shutting down"` before `join`. Keys: codes 371–383 and F1–F12 go through `post_window_key(vk, extended)` with a VK table and `lParam |= 1<<24` for the extended keys; new `type {text}` posts `WM_CHAR` per UTF-16 unit → new `game_type text` tool (`RunOnUiThread=false`). Screenshots: `agsmcp-<counter>.bmp`; the C# side deletes the file after reading (not with `outPath`).
+Files: `agsmcp.cpp`, `Tools/GameTools.cs`, `Engine/KeyMap.cs`.
+Tests: unit `KeyMap.IsWindowRouted(code)`. Smoke: `edit_script GlobalScript` adds `System.Log(eLogInfo, "MCPKEY %d", keycode);` to `on_key_press`; `game_key Up` / `F7` → `get_game_log` contains `MCPKEY 372` / `MCPKEY 365`; add `function MCP_Quit() { QuitGame(0); }`, `game_call_function MCP_Quit`, poll `game_status` → exited within 3 s (`Stopwatch`).
+Docs: ARCHITECTURE Engine plugin (threading, key routing); remove the key Known gap.
+
+### 10. Engine reach (C++ and C#)
+Scope: engine `text_extent {font, text}` → `GetTextExtent`; `call_function` honours `globalScript` 0/1. C#: `game_text_extent font text`; `game_call_function roomScript=true` verifies the function against `<game>\roomN.asc` on disk (N from `state.room`) with `ScriptText.DefinesFunction`. `game_run_interaction target mode [inventory]` (`RunOnUiThread=true`): `state` → room; `RoomSession.Open`; `hotspot:N|hName` → centroid of that hotspot in the exported mask, then up to 8 sample points until `hover_name` equals the hotspot `Description`; `object:N|oName` → object x/y from state plus the sprite size (`RootSpriteFolder.FindSpriteByID`) → centre; `character:N|cName` → feet x/y and the current frame's sprite height; then queued `process_click`. Returns `{point, hoverName, queued}` or refuses.
+Tests: unit `MaskGeometry.Centroid` and sample ordering on a tiny indexed bitmap. Smoke: `game_run_interaction hotspot:<probe> mode=1` in the probe room → `hoverName` is the hotspot description and `game_wait_until ready` is met; `game_text_extent 0 "Hi"` width > 0.
+Docs: ARCHITECTURE Commands table and Player simulation.
+
+### 11. Bursts and log-line waits
+Scope: engine `screenshot {frames, everyN}`: a pending request kept across PRERENDER frames (`g_burst`), captures `agsmcp-<counter>-<i>.bmp` with `steady_clock` stamps, completes when done; worker wait = `frames*everyN*100 ms + 5 s`. C# `game_screenshot [frames] [everyN] [outPath]` (a burst requires `outPath` as a directory; writes `frame-NNN.png` + `frames.json`; longer `EngineClient.Send` timeout). `game_wait_until condition=logLine pattern [sinceLine]` polls the log with a regex and returns the matching line and its index.
+Tests: unit `GameWait.FindLogLine(lines, pattern, since)`. Smoke: burst of 5 frames every 2 → 5 PNGs + json; `logLine` wait for `MCPKEY` after a `game_key`.
+Docs: ARCHITECTURE Commands; playtesting facts (screenshot staleness).
+
+### 12. Desktop driver, part 1
+Scope: `Tools/DesktopTools.cs` (P/Invoke user32: `GetClientRect`, `ClientToScreen`, `ShowWindow`, `SetForegroundWindow`, `SetProcessDPIAware`), a second `GameRunner` (`ctx.DesktopRunner`). `desktop_run exe [startRoom] [renderer=software] [gameWidth gameHeight]`: args `--windowed --background --gfxdriver <renderer> --log-file=all:debug --log-file-path=<temp>\ags-mcp-desktop --user-data-dir …`, env `SDL_RENDER_DRIVER=software`, **no** `AGSMCP_PORT`; waits up to 15 s for `MainWindowHandle`; resolution defaults to `Settings.CustomResolution` when a game is open. `desktop_status`, `desktop_stop`, `desktop_screenshot [outPath] [frames] [intervalMs]`: `Graphics.CopyFromScreen` of the game area, NearestNeighbor + `PixelOffsetMode.Half` downscale to native size; a burst writes `frame-NNN.png` + `frames.json` on a drift-corrected schedule. `get_game_log [source=engine|desktop]` (default: the last launched). All `RunOnUiThread=false`. Pure helper `Engine/DesktopGeometry.cs`: `Scale(cw,ch,W,H)=max(1,min(floor(cw/W),floor(ch/H)))`, centred offset, `GameToScreen`.
+Tests: unit geometry cases (exact fit, letterbox, window smaller than the game). Smoke: `build_game mode=release`, `desktop_run <exe> startRoom=1`, `desktop_status.running`, `desktop_screenshot` PNG is W×H, `desktop_stop`.
+Docs: ARCHITECTURE new "Desktop driver" section (D3D/OpenGL frames read black through `CopyFromScreen` → software renderer; a hidden-window launch has no HWND; focus theft), README section.
+
+### 13. Desktop driver, part 2
+Scope: `desktop_click x y [button]` (focus first: `ShowWindow SW_RESTORE`, a `keybd_event(VK_MENU)` tap to unlock `SetForegroundWindow`, then `SetForegroundWindow`; `SetCursorPos` + `mouse_event` down/up with short delays); `desktop_key name` (VK table in `Engine/VirtualKeys.cs`, `MapVirtualKey` scan code, `KEYEVENTF_EXTENDEDKEY` for 0x21–0x28, 0x2D, 0x2E); `desktop_type text` (`SendInput` with `KEYEVENTF_UNICODE`).
+Tests: unit `VirtualKeys.Resolve` names and extended flags. Smoke: after `desktop_run`, `desktop_click` on the probe hotspot in Look mode (click once more to dismiss speech), `desktop_key Escape`, no exception; `get_game_log source=desktop` shows the `MCPKEY` line from `desktop_key Up`.
+Docs: ARCHITECTURE Desktop driver; README and tools.md rows.
+
+### 14. Skill update
+Scope (client-neutral, project-agnostic): `tools.md` rows for every tool added in 2–13; `playtesting.md`: a release-build section (`build_game mode=release`, the `desktop_*` loop, why the software renderer) and additions to "Things that look like bugs but are not": saves restore script globals by position, so new GlobalScript globals go at the end; visited rooms' object positions are stored in saves; `RestoredSaveInfo.GUIControlCount` was reported as 0 (unverified); the 150000-iteration loop guard → stage cache building across frames; the wait cursor shows over a modal overlay unless hidden; `Hotspot.RunInteraction` is deferred and not usable for tests; fonts are read from disk at build time but scripts are not; screenshot staleness; `batch` for bulk passes instead of raw HTTP; budget 140–260k tokens per play-test subagent. `scripting.md`: line endings, define-before-use, stale copy → `reload_script`, RGB565 colour helper. `SKILL.md`: pointers to the new references; "subagents have the ags tools: use them for dialog edits instead of writing proposals". `evals.json`: 2–3 evals (a release-build check with the desktop tools; GUI control creation; measuring a dialog line).
+Gate: `python -c "import json; json.load(open('skills/ags-mcp/evals/evals.json'))"` succeeds; every tool in `tools/list` appears in `tools.md` (a PowerShell one-liner over the live server, output quoted).
+
+### 15. Release 0.2.0
+Scope: reconcile ARCHITECTURE Known gaps with 2–13; README tools tables complete; `Directory.Build.props` `<Version>0.2.0</Version>`; `install.ps1` Next steps; `build.ps1 -Test -Engine -Package` produces `dist/ags-mcp-0.2.0.zip`.
+Gate: the full `smoke.ps1` passes (pass/fail counts quoted); the zip exists; the tool count from `tools/list` is recorded in the README.
+
+## Risks
+
+- C++ milestones (9–11) need VS 2022 + CMake and a closed editor for `-Deploy`; `-StopEditor` discards unsaved editor work.
+- The smoke test needs the editor open with a game (`SmokeGame`); milestones 12–13 need an interactive, unlocked desktop (focus theft, DPI scaling); D3D/OpenGL windows read black through `CopyFromScreen`.
+- `game_run_interaction` for hotspots depends on the hotspot being uncovered by the player sprite; it refuses rather than mis-clicking.
+- Save-first in `build_game` (decision 9) changes behaviour callers may rely on; recorded in ARCHITECTURE.

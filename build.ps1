@@ -6,13 +6,13 @@
   .\build.ps1                         # build (Release)
   .\build.ps1 -Test                   # build + unit tests
   .\build.ps1 -Deploy                 # build + copy DLLs into $AgsDir (editor must be closed)
-  .\build.ps1 -Deploy -Run            # ...then start the editor (-Game <Game.agf> opens that game)
+  .\build.ps1 -Deploy -Run            # ...then start the editor and open -Game <Game.agf>, else SmokeGame
   .\build.ps1 -Deploy -StopEditor     # close a running editor first (unsaved work is lost!)
   .\build.ps1 -Engine                 # build the native engine plugin (agsmcp.dll) with CMake
   .\build.ps1 -Engine -Deploy         # ...and copy agsmcp.dll into $AgsDir
   .\build.ps1 -Engine -Package        # build both and zip a release into dist\
 
-  -AgsDir defaults to AgsDir in Local.props (see Local.props.example).
+  -AgsDir defaults to AgsDir in Local.props (see Local.props.example), and -Game to SmokeGame.
 #>
 param(
     [string]$AgsDir,
@@ -30,6 +30,7 @@ $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 . "$root\tools\LocalProps.ps1"
 if (-not $AgsDir) { $AgsDir = Get-LocalProp AgsDir }
+if (-not $Game) { $Game = Get-LocalProp SmokeGame }
 
 if (-not $AgsDir -or -not (Test-Path (Join-Path $AgsDir "AGSEditor.exe"))) {
     throw "AGSEditor.exe not found in '$AgsDir'. Set AgsDir in Local.props (copy Local.props.example) or pass -AgsDir <path to your AGS 3.6 folder>."
@@ -75,6 +76,7 @@ if ($Package) {
     Copy-Item $pluginDll, $engineDll, "$root\install.ps1", "$root\README.md", "$root\LICENSE" $stage
     Copy-Item "$root\skills\ags-mcp" "$stage\skills\ags-mcp" -Recurse
     Remove-Item "$stage\skills\ags-mcp\evals" -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem "$stage\skills" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
     $zip = "$dist\$name.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
     # Entries are added one by one because Windows PowerShell's ZipFile.CreateFromDirectory writes "\" separators.
@@ -115,6 +117,7 @@ if ($Deploy) {
 
 if ($Run) {
     $editor = Join-Path $AgsDir "AGSEditor.exe"
+    if ($Game -and -not (Test-Path $Game)) { Write-Warning "Game '$Game' not found; starting the editor with no game open." }
     # Start-Process rejects an empty -ArgumentList, so pass it only when there is a game to open.
     if ($Game -and (Test-Path $Game)) { Start-Process $editor -ArgumentList "`"$Game`"" -WorkingDirectory $AgsDir }
     else { Start-Process $editor -WorkingDirectory $AgsDir }

@@ -17,10 +17,10 @@
   Close the AGS editor first: it locks the plugin DLL while it runs.
 
 .EXAMPLE
-  irm https://raw.githubusercontent.com/pravusjif/ags-mcp-api/main/install.ps1 | iex
+  irm https://raw.githubusercontent.com/pravusjif/pravus-ags-mcp/main/install.ps1 | iex
 
 .EXAMPLE
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pravusjif/ags-mcp-api/main/install.ps1))) -AgsDir C:\AGS-3.6.2
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pravusjif/pravus-ags-mcp/main/install.ps1))) -AgsDir C:\AGS-3.6.2
 
 .EXAMPLE
   .\install.ps1 -AgsDir C:\AGS-3.6.2 -InstallSkill    # from an unpacked release
@@ -42,7 +42,7 @@ param(
     # Remove the plugin DLLs from the AGS folder instead of installing them.
     [switch]$Uninstall,
     # GitHub repository that publishes the releases.
-    [string]$Repo = "pravusjif/ags-mcp-api"
+    [string]$Repo = "pravusjif/pravus-ags-mcp"
 )
 
 # Everything runs inside functions so that "irm | iex" leaves the caller's session settings alone.

@@ -94,6 +94,9 @@ See audio.md for making the sounds. Clips live in `Game.agf`, so `save_project` 
 | `stop_game` / `game_status` / `get_game_log [sinceLine] [limit]` | The engine log shows script errors with line numbers when the game crashes or quits unexpectedly. |
 | `runtime_enable_plugin` | Once per project, then `save_project`; required for the `game_*` tools. |
 
+### When the server is unreachable
+
+With the editor closed (or the plugin not loaded), `AGSEditor.exe <Game.agf> /compile` builds the game from disk and exits. It fails while the project is open in an editor (`_OpenInEditor.lock`), and it prints compiler errors only when its output is redirected (`AGSEditor.exe <Game.agf> /compile > build.log 2>&1`, then read the file).
 ## Player simulation (`game_*`)
 
 See playtesting.md for the loop. Quick shapes:

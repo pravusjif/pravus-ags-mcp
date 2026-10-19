@@ -23,5 +23,6 @@ These are the instructions for any coding agent working on this repo. `CLAUDE.md
 Machine-specific paths live in the git-ignored `Local.props` at the repo root (template: `Local.props.example`). Read it when you need one:
 - `AgsDir`: the AGS 3.6.2.21 editor folder. MSBuild and `build.ps1` use it.
 - `AgsSourceDir`: the AGS source tree, for API lookups.
+- `SmokeGame` (optional): a throwaway `Game.agf` that `build.ps1 -Run` opens when `-Game` is absent. With no game open, the editor's start-up dialog refuses every tool call, so live verification needs it (or `-Game`).
 
 The repo depends on no particular game. The smoke test creates its own throwaway game with `create_project`, and the `ags-mcp` skill works on whatever game the user has open. Don't add references to specific games.
