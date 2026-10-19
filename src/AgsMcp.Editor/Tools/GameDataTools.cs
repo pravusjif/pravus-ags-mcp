@@ -110,6 +110,7 @@ namespace AgsMcp.Editor.Tools
                           string.Join(", ", EntityRegistry.TypeNames.Where(IsCreatable)) + ". " +
                           "globalvariable, customproperty, audiocliptype and audiofolder require a 'Name' in properties; others are auto-named. " +
                           "An audiofolder also takes an optional 'Parent' folder name (default: the root). Audio clips come from import_audio. " +
+                          "A font is a copy of font 0, or of the font given as 'CopyFrom' (ID or script name), file included; replace its file with import_font. " +
                           "Any other given properties are applied to the new entity. Call save_project to persist.",
             InputSchema = Schema.Object()
                 .Required("type", TypeProp())
@@ -426,7 +427,8 @@ namespace AgsMcp.Editor.Tools
                 {
                     if (ignored != null)
                     {
-                        bool consumed = KindsReadingCreationKeys.Contains(kind.Name) && CreationKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase);
+                        bool consumed = (KindsReadingCreationKeys.Contains(kind.Name) && CreationKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase)) ||
+                                        (kind.Name == "font" && string.Equals(pair.Key, "CopyFrom", StringComparison.OrdinalIgnoreCase));
                         if (!consumed)
                             ignored.Add(new { key = pair.Key, reason = IgnoredReason(kind, pd, pair.Key) });
                         continue;

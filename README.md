@@ -182,7 +182,7 @@ take is refused, with the list of the ones it does.
 |------|-------------|
 | `get_properties(type, id)` | All properties of an entity (honours the editor's property-grid metadata), plus its events for characters and inventory items. |
 | `set_properties(type, id, properties)` | Set one or more properties (enum by name or number; script-name uniqueness enforced). |
-| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, audio type, audio folder, global variable or custom-property definition. Properties that fit nothing are listed in `ignored`. |
+| `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, font (a copy of font 0 or `CopyFrom`), audio type, audio folder, global variable or custom-property definition. Properties that fit nothing are listed in `ignored`. |
 | `delete_entity(type, id)` | Delete an entity and renumber IDs as the editor does. |
 | `get_dialog_script(id)` / `set_dialog_script(id, [script], [options])` | Read/write a dialog's options (`{text, show, say}`) and its dialog-script text. |
 | `set_event(type, id, event, [function])` | Bind a character, inventory, GUI or GUI-control event (Look, Interact, Talk, UseInv, …, OnClick) and add a stub to GlobalScript. |
@@ -233,6 +233,7 @@ the room script.
 | `replace_sprite(number, path\|base64, …)` | Replace a sprite's image, keeping its number. |
 | `delete_sprite(number)` | Delete a sprite (refuses with a usage report if still referenced). |
 | `create_view([name], loops)` | Create a view; `loops` is an array of `{frames, runNextLoop?}` and each frame is `{sprite, delay?, flipped?, sound?}` (`sound` is an audio clip's index). |
+| `import_font(id, path, [height], [pointSize])` | Import a TTF or WFN file over a font slot (`agsfnt<id>.ttf\|.wfn`); a TTF takes a pixel `height` or a `pointSize`. New slots come from `create_entity font`. |
 
 ### Audio
 | Tool | Description |

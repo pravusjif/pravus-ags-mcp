@@ -309,6 +309,38 @@ try {
             $tree.folders[0].name -eq $again -and ($flat.sprites.number -contains $n) -and
             ($root.folders.name -contains $folder) -and -not ($root.sprites.number -contains $n)
     }
+    $newFont = $null
+    function Get-FontProps { param($Id) $h = @{}; (Get-Json (Invoke-Mcp "get_properties" @{ type = "font"; id = $Id })).properties | ForEach-Object { $h[$_.name] = $_.value }; $h }
+    Check "create_entity font copies font 0 into a new slot and its agsfnt file" {
+        $before = (Get-Json (Invoke-Mcp "list_entities" @{ type = "font" })).count
+        $r = Get-Json (Invoke-Mcp "create_entity" @{ type = "font"; properties = @{ CopyFrom = 0; LineSpacing = 3 } })
+        $script:newFont = [int]$r.id
+        $after = (Get-Json (Invoke-Mcp "list_entities" @{ type = "font" })).count
+        $p = Get-FontProps $script:newFont
+        $after -eq $before + 1 -and $script:newFont -eq $before -and $r.applied -contains "LineSpacing" -and -not $r.ignored -and
+            (Test-Path (Join-Path $Folder "agsfnt$($script:newFont).wfn")) -and $p.ProjectFilename -eq "agsfnt$($script:newFont).wfn" -and $p.Height -gt 0
+    }
+    Check "import_font puts a TTF and then a WFN over the slot and refuses other files" {
+        $n = $script:newFont
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) "ags-mcp-smoke-font"
+        New-Item -ItemType Directory -Force $tmp | Out-Null
+        $wfnCopy = Join-Path $tmp "smoke.wfn"
+        Copy-Item (Join-Path $Folder "agsfnt0.wfn") $wfnCopy -Force
+        $bad = $false
+        try { Invoke-Mcp "import_font" @{ id = $n; path = (Join-Path $tmp "smoke.otf") } | Out-Null } catch { $bad = $_.Exception.Message -match "\.ttf and \.wfn" }
+        $ttfOk = $true
+        $ttf = Join-Path $env:WINDIR "Fonts\arial.ttf"
+        if (Test-Path $ttf) {
+            $t = Get-Json (Invoke-Mcp "import_font" @{ id = $n; path = $ttf; height = 14 })
+            $ttfOk = $t.projectFile -eq "agsfnt$n.ttf" -and $t.pointSize -gt 0 -and $t.height -gt 0 -and
+                (Test-Path (Join-Path $Folder "agsfnt$n.ttf")) -and -not (Test-Path (Join-Path $Folder "agsfnt$n.wfn"))
+        } else { Write-Host "    (no $ttf; TTF import not exercised)" -ForegroundColor DarkGray }
+        $w = Get-Json (Invoke-Mcp "import_font" @{ id = $n; path = $wfnCopy })
+        $p = Get-FontProps $n
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        $bad -and $ttfOk -and $w.projectFile -eq "agsfnt$n.wfn" -and $w.pointSize -eq 0 -and $w.height -gt 0 -and
+            $p.ProjectFilename -eq "agsfnt$n.wfn" -and $p.SourceFilename -eq $wfnCopy -and -not (Test-Path (Join-Path $Folder "agsfnt$n.ttf"))
+    }
     Check "create_view accepts the schema form ({frames:[{sprite, delay}]})" {
         $loops = @(@{ frames = @(@{ sprite = $script:newSprite; delay = 4 }, @{ sprite = $script:newSprite; flipped = $true }) })
         $v = Get-Json (Invoke-Mcp "create_view" @{ name = "vSmoke"; loops = $loops })

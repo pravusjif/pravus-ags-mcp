@@ -291,6 +291,46 @@ namespace AgsMcp.Editor
         public static string GetSpriteUsageReport(int spriteNumber, Game game) =>
             AGS.Editor.Utils.SpriteTools.GetSpriteUsageReport(spriteNumber, game);
 
+        // --- Fonts ---
+        // The editor's native font slots mirror Game.Fonts; FontsComponent keeps them in step through these
+        // NativeProxy calls. Font files are agsfnt<ID>.wfn|ttf in the game folder (the editor's working directory).
+
+        public static void OnFontAdded(Game game, int id) =>
+            InvokeNative("OnFontAdded", new[] { typeof(Game), typeof(int) }, new object[] { game, id });
+
+        /// <summary>Pushes a font's settings to its native slot and refreshes Font.Height/FamilyName from it.</summary>
+        public static void OnFontUpdated(Game game, int id, bool forceUpdate) =>
+            InvokeNative("OnFontUpdated", new[] { typeof(Game), typeof(int), typeof(bool) }, new object[] { game, id, forceUpdate });
+
+        /// <summary>Reloads a font slot from its file on disk; throws AGSEditorException for a bad file.</summary>
+        public static void ReloadFont(int id) =>
+            InvokeNative("ReloadFont", new[] { typeof(int) }, new object[] { id });
+
+        /// <summary>
+        /// The TTF point size whose pixel height is closest to <paramref name="pixelHeight"/>; throws for a bad file.
+        /// <paramref name="fileName"/> must be relative to the game folder (the native asset manager's search path).
+        /// </summary>
+        public static int FindTTFSizeForHeight(string fileName, int pixelHeight) =>
+            (int)InvokeNative("FindTTFSizeForHeight", new[] { typeof(string), typeof(int) }, new object[] { fileName, pixelHeight });
+
+        /// <summary>Rebuilds the Fonts node of the project tree (FontsComponent's private RePopulateTreeView). Best-effort.</summary>
+        public static void RefreshFontsTree()
+        {
+            try
+            {
+                foreach (IEditorComponent comp in AGS.Editor.ComponentController.Instance.Components)
+                {
+                    if (comp.ComponentID != "Fonts") continue;
+                    InvokePrivate(comp, "RePopulateTreeView", Type.EmptyTypes, new object[0]);
+                    return;
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Write("Could not refresh the fonts tree: " + e.Message);
+            }
+        }
+
         // --- Audio ---
         // AudioClip model edits are plain AGS.Types; only the tree refresh, the script header and the build-output
         // paths are editor knowledge. The audio component (internal AudioComponent, ID "AudioNew") implements the

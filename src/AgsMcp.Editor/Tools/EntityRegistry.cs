@@ -197,12 +197,14 @@ namespace AgsMcp.Editor.Tools
                 },
                 new EntityKind
                 {
-                    // Fonts and audio clips are backed by resource files: audio clips are created by import_audio
-                    // (AudioTools); fonts cannot be created yet.
+                    // A font is backed by its agsfnt<ID> file: create copies one ('CopyFrom', default font 0) as the
+                    // editor's New Font does, and import_font replaces it (FontTools).
                     Name = "font", NameProperty = null,
                     Enumerate = g => g.Fonts.Cast<object>(),
                     IdOf = e => ((Font)e).ID.ToString(),
                     NameOf = e => ((Font)e).ScriptID,
+                    Create = FontTools.CreateFont,
+                    AfterChange = FontTools.AfterChange,
                 },
                 new EntityKind
                 {

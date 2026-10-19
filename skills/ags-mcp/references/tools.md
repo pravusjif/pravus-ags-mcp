@@ -80,6 +80,8 @@ All room tools load the room in the editor (switching away from whatever was loa
 | `replace_sprite number path\|base64` | Keeps the number, so references stay valid. Use it to iterate on art. |
 | `delete_sprite number` | Refuses with a usage report if a view/object/character still uses it. |
 | `create_view [name] loops` | `loops` is an array of `{frames, runNextLoop?}`; a frame is `{sprite, delay?, flipped?, sound?}`. Every sprite must exist. `sound` is an audio clip's **index** (from `import_audio`), not its ID. Loop 0 is "down" for walking views (0 down, 1 left, 2 right, 3 up; 4–7 diagonals). Script constant = upper-cased name. |
+| `create_entity font {CopyFrom?, ...}` | New font slot `N = count`, a copy of font 0 (or `CopyFrom`, an ID or `eFont…` name) including its `agsfnt<N>` file; other properties (`Name`, `LineSpacing`, `OutlineFont`…) are applied. Script name `eFont` + Name without spaces. |
+| `import_font id path [height\|pointSize]` | Copies a `.ttf` or `.wfn` (absolute path) to `agsfnt<id>.ttf\|.wfn`, deleting the other kind; other extensions are refused. TTF: `height` is pixels, turned into the closest point size; else `pointSize`, else the current size or 10. WFN is a bitmap font: no size arguments, scale it with `SizeMultiplier` (reset to 1 by an import). Returns `{id, projectFile, pointSize, height}`; `height` is the full drawn height and can exceed the asked one. A bad file is refused and the old one kept. `save_project` to keep the slot. |
 
 ## Audio
 
