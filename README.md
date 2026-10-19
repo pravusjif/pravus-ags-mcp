@@ -109,8 +109,9 @@ from the MCP menu; settings are saved in `%APPDATA%\AGS-MCP\settings.json`. The 
 
 To use the `game_*` tools you must, once per project: deploy `agsmcp.dll` (above), call `runtime_enable_plugin`,
 then `save_project`. `run_game` then builds the game with the plugin baked in and launches it; the `game_*` tools
-talk to it over a private loopback port. Untick the plugin in the project's Plugins node (or don't ship `agsmcp.dll`)
-for release builds.
+talk to it over a private loopback port. For a release build call `build_game` with `mode=release`: it disables the
+plugin, turns Debug mode off and deletes `agsmcp.dll` from `Compiled\Windows`. `mode=debug` turns both back on, and
+`runtime_disable_plugin` only unticks the plugin.
 
 ### Agent skill
 
@@ -168,7 +169,7 @@ take is refused, with the list of the ones it does.
 ### Project
 | Tool | Description |
 |------|-------------|
-| `project_info` | Name, folder, resolution, colour depth, editor version and entity counts. |
+| `project_info` | Name, folder, resolution, colour depth, editor version, entity counts, enabled `plugins`, `debugMode`, and `enginePlugin{available, enabled}` for `agsmcp.dll`. |
 | `save_project` | Write all in-memory changes to disk (`Game.agf`, scripts, sprites, the loaded room). |
 | `batch(calls, [stopOnError])` | Run several tool calls `[{name, arguments}]` in order in one request; returns each call's `ok` and `content` or `error` (JSON text parsed, images replaced by a note). Stops at the first failure unless `stopOnError=false`. |
 | `create_project(folder, [template], [gameName], [fileName], [saveCurrent])` | Create a game from an editor template (Sierra-style, Empty Game, …) in a new or empty folder and open it. |
@@ -248,8 +249,8 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 ### Build and run
 | Tool | Description |
 |------|-------------|
-| `build_game([rebuild])` | Compile to `Compiled\Windows\<name>.exe`; returns structured messages. |
-| `run_game([startRoom], [rebuild])` | Build (incrementally) and launch the game windowed, logging to a file; stops any prior game before building. |
+| `build_game([rebuild], [mode])` | Save, then compile to `Compiled\Windows\<name>.exe`, as the editor's Build command does (a Debug-mode change forces a rebuild); returns structured messages, `debugMode` and `enginePlugin`. `mode=release` disables the `agsmcp` plugin, turns Debug mode off and deletes a stale `agsmcp.dll` from the build folder; `mode=debug` turns both back on. The mode is saved with the project. |
+| `run_game([startRoom], [rebuild], [mode])` | Build as `build_game` does (saving first) and launch the game windowed, logging to a file; stops any prior game, or a leftover one running the built exe, before building. |
 | `stop_game` | Stop the running game. |
 | `game_status` | Running/exited, pid, exit code, uptime, log path. |
 | `get_game_log([sinceLine], [limit])` | Tail the engine log with a `nextLine` cursor. |
@@ -258,6 +259,7 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | Tool | Description |
 |------|-------------|
 | `runtime_enable_plugin` | Enable the `agsmcp` engine plugin for the project (then `save_project`). |
+| `runtime_disable_plugin` | Disable it again (then `save_project`); `build_game mode=release` also does this and removes the copied DLL. |
 | `game_state` | Live snapshot: room, player, characters, objects (views numbered as in the editor), mouse, score, interface-enabled, cutscene and paused flags, recent events. |
 | `game_screenshot([outPath])` | Capture the running game as a PNG, or write it to `outPath`. |
 | `game_click(x, y, [button])` | Move the mouse and click (real input; moves the OS cursor). |

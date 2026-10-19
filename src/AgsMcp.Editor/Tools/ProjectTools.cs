@@ -16,13 +16,16 @@ namespace AgsMcp.Editor.Tools
                 Name = "project_info",
                 Title = "Project info",
                 Description = "Summary of the game project open in the AGS editor: name, folder, resolution, colour depth, " +
-                              "editor version, and how many rooms, characters, inventory items, dialogs, GUIs, views, sprites and scripts it has.",
+                              "editor version, and how many rooms, characters, inventory items, dialogs, GUIs, views, sprites and scripts it has. " +
+                              "Also the enabled engine plugins, whether Debug mode is on, and whether the agsmcp engine plugin " +
+                              "(needed by the game_* tools) is installed in the editor ('available') and enabled for this game.",
                 InputSchema = Schema.Object().Build(),
                 Annotations = ToolAnnotations.ReadOnlyTool,
                 Handler = args =>
                 {
                     Game game = ctx.RequireGame();
                     var s = game.Settings;
+                    EditorInternals.EnginePluginState engine = EditorInternals.GetEnginePluginState(ctx.Editor, game, GameTools.PluginFileName);
                     return ToolResult.Json(new
                     {
                         gameName = s.GameName,
@@ -47,6 +50,8 @@ namespace AgsMcp.Editor.Tools
                             scriptModules = game.ScriptsAndHeaders.Count,
                         },
                         plugins = game.Plugins.Select(p => p.FileName).ToList(),
+                        debugMode = s.DebugMode,
+                        enginePlugin = new { available = engine.Available, enabled = engine.Enabled },
                     });
                 },
             };

@@ -13,7 +13,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 - [x] 3. `batch` tool and `outPath` on the image tools — `McpServer.InvokeTool`, `Tools/BatchTools.cs`, `Tools/ImageOutput.cs` on `render_room`/`get_sprite`/`game_screenshot`; "batch tool and outPath on the image tools".
 - [x] 4. `list_sprites`, `create_sprite_folder`, `move_script_module` — the three tools plus pure `ModuleOrder.Plan`; "list_sprites, create_sprite_folder, move_script_module".
 - [x] 5. GUI controls: list/create/delete, `guicontrol` entity kind, GUI events in `set_event` — `Tools/GuiTools.cs`, `EntityKind.ResolveId`, `set_event gui|guicontrol`; "GUI controls: list/create/delete, guicontrol kind, GUI events".
-- [ ] 6. Engine-plugin toggle, `build_game`/`run_game` modes, `project_info` state, run robustness
+- [x] 6. Engine-plugin toggle, `build_game`/`run_game` modes, `project_info` state, run robustness — `runtime_disable_plugin`, `mode=debug|release`, editor-parity save-first builds, retry/kill/wait; "Plugin toggle, build modes, editor-parity builds, run robustness".
 - [ ] 7. Fonts: `create_entity font`, `import_font`
 - [ ] 8. Text tooling: `measure_text` (WFN parser) and `list_strings`
 - [ ] 9. Engine plugin robustness: clean shutdown, reliable keys, `game_type`, unique screenshot files
@@ -57,6 +57,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 20. (2026-10-19) `outPath` returns `{path, width, height, note}`: `note` keeps the text the tool returns beside the image (`render_room`'s mask legend). Parent folders are created; only rooted drive or UNC paths are accepted (`ImageOutput.IsAbsolutePath`).
 21. (2026-10-19) `create_sprite_folder` keeps names unique across the whole tree by appending a number and returning the actual name, as `create_script_module` does, rather than refusing: every sprite tool finds folders by name, first match. `move_script_module` up/down at an end is a no-op (`moved=false`), not an error.
 22. (2026-10-19) A `gui:control` side matches a control's name before its ID. GUI and control stubs go to `GUI.ScriptModule` (GlobalScript by default), as the GUI editor does, and default to `<scriptName>_<property>`; `event` accepts the property name or it without `On` (`Click`). `get_properties` on a GUI or control reports `events` as `{property: function}`. `create_gui_control` reports properties it could not apply in `ignored`, like `create_entity`.
+23. (2026-10-19) Build parity: `NeedsRebuildForDebugMode`, `SaveGameFiles` and `SaveUserDataFile` are public on `AGSEditor` (no reflection); `CompileGameFull` also saves the user data file after the build, as the editor does. A failed save throws. `build_game` stops a game started by `run_game`, kills leftover processes of the built exe (`GetProcessesByName`, then `MainModule.FileName`) and waits for its files first. The build retry looks at errors only ("Failed to delete a temporary file" is also a warning on good builds). `mode=debug` sets Debug mode even without the plugin installed; `runtime_disable_plugin` leaves a copied `agsmcp.dll` in place (only `mode=release` deletes it). A mode change is saved with the project even when the build then fails. Both tools return `mode`, `debugMode` and `enginePlugin`.
 
 ## Verified facts (AGS 3.6.2.21 source and this repo)
 

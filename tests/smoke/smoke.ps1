@@ -395,14 +395,38 @@ try {
     Write-Host "Build" -ForegroundColor Cyan
     Check "build_game succeeds" { (Get-Json (Invoke-Mcp "build_game" @{} 300)).ok -eq $true }
     Check "the build kept the imported clip's AudioCache copy" { Test-Path (Join-Path $Folder $script:beep.cacheFile) }
+    $windowsDir = Join-Path $Folder "Compiled\Windows"
+    Check "build_game mode=release drops the plugin and Debug mode" {
+        $b = Get-Json (Invoke-Mcp "build_game" @{ mode = "release" } 300)
+        $info = Get-Json (Invoke-Mcp "project_info")
+        $b.ok -eq $true -and -not (Test-Path (Join-Path $windowsDir "agsmcp.dll")) -and
+            $info.debugMode -eq $false -and @($info.plugins).Count -eq 0 -and $info.enginePlugin.enabled -eq $false
+    }
+    Check "build_game mode=debug restores Debug mode and the plugin" {
+        $b = Get-Json (Invoke-Mcp "build_game" @{ mode = "debug" } 300)
+        $info = Get-Json (Invoke-Mcp "project_info")
+        $b.ok -eq $true -and (Test-Path (Join-Path $windowsDir "agsmcp.dll")) -and
+            $info.debugMode -eq $true -and @($info.plugins) -contains "agsmcp.dll" -and $info.enginePlugin.enabled -eq $true
+    }
 
     # ---- Run + player simulation ----
     Write-Host "Run and player simulation" -ForegroundColor Cyan
+    Check "runtime_disable_plugin disables agsmcp" {
+        $d = Get-Json (Invoke-Mcp "runtime_disable_plugin")
+        $info = Get-Json (Invoke-Mcp "project_info")
+        $d.enabled -eq $false -and $info.enginePlugin.enabled -eq $false -and -not (@($info.plugins) -contains "agsmcp.dll")
+    }
     Check "runtime_enable_plugin enables agsmcp" { (Get-Json (Invoke-Mcp "runtime_enable_plugin")).enabled -eq $true }
     Check "save_project persists" { (Get-Text (Invoke-Mcp "save_project")) -match "saved" }
     Check "run_game launches with the engine plugin" {
         $r = Get-Json (Invoke-Mcp "run_game" @{ startRoom = 1 } 300)
+        $script:firstPid = $r.pid
         $r.launched -eq $true
+    }
+    Check "run_game again while the game runs relaunches cleanly" {
+        $r = Get-Json (Invoke-Mcp "run_game" @{ startRoom = 1 } 300)
+        $s = Get-Json (Invoke-Mcp "game_status")
+        $r.launched -eq $true -and $r.pid -ne $script:firstPid -and $s.running -eq $true -and $s.pid -eq $r.pid
     }
     Start-Sleep -Seconds 4
     Check "game_state reports room 1 and the player" {

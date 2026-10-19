@@ -14,8 +14,8 @@ namespace AgsMcp.Editor.Tools
 {
     /// <summary>
     /// Player-simulation tools (M7). These talk to the agsmcp engine plugin inside the game launched by
-    /// run_game, over loopback TCP, so they run off the UI dispatcher. runtime_enable_plugin is the one
-    /// exception: it edits the editor's plugin state and must run on the UI thread.
+    /// run_game, over loopback TCP, so they run off the UI dispatcher. runtime_enable_plugin and
+    /// runtime_disable_plugin are the exceptions: they edit the editor's plugin state and must run on the UI thread.
     /// </summary>
     internal static class GameTools
     {
@@ -23,6 +23,7 @@ namespace AgsMcp.Editor.Tools
         {
             var client = new EngineClient(BuildRunTools.EnginePort);
             yield return RuntimeEnablePlugin(ctx);
+            yield return RuntimeDisablePlugin(ctx);
             yield return GameState(ctx, client);
             yield return GameScreenshot(ctx, client);
             yield return GameClick(ctx, client);
@@ -35,7 +36,7 @@ namespace AgsMcp.Editor.Tools
             yield return GameCallFunction(ctx, client);
         }
 
-        private const string PluginFileName = "agsmcp.dll";
+        internal const string PluginFileName = "agsmcp.dll";
 
         private static Tool RuntimeEnablePlugin(ToolContext ctx) => new Tool
         {
@@ -44,7 +45,7 @@ namespace AgsMcp.Editor.Tools
             Description = "Enable the native 'agsmcp' engine plugin for this project so the game, once built and run, " +
                           "can be driven by the game_* tools. The plugin DLL must already be in the AGS editor folder " +
                           "(build & deploy the engine plugin, then restart the editor). Call save_project afterwards. " +
-                          "Untick the plugin (or do not ship it) for release builds.",
+                          "Do not ship it: build_game mode=release disables it (or use runtime_disable_plugin).",
             InputSchema = Schema.Object().Build(),
             Annotations = ToolAnnotations.Mutating,
             Handler = args =>
@@ -68,7 +69,31 @@ namespace AgsMcp.Editor.Tools
                     enabled = true,
                     pluginName = r.PluginName,
                     alreadyEnabled = r.AlreadyEnabled,
-                    note = "Call save_project to persist this, then build_game/run_game. Untick for release builds.",
+                    note = "Call save_project to persist this, then build_game/run_game. Use build_game mode=release for release builds.",
+                });
+            },
+        };
+
+        private static Tool RuntimeDisablePlugin(ToolContext ctx) => new Tool
+        {
+            Name = "runtime_disable_plugin",
+            Title = "Disable the engine plugin",
+            Description = "Disable the native 'agsmcp' engine plugin for this project (untick it in the Plugins node), so " +
+                          "builds no longer load it and the game_* tools cannot reach the game. Call save_project afterwards " +
+                          "(build_game and run_game also save). An agsmcp.dll copied into Compiled\\Windows by an earlier " +
+                          "build stays there; build_game mode=release disables the plugin and deletes that copy.",
+            InputSchema = Schema.Object().Build(),
+            Annotations = new ToolAnnotations { Idempotent = true },
+            Handler = args =>
+            {
+                Game game = ctx.RequireGame();
+                bool wasEnabled = EditorInternals.DisableEnginePlugin(ctx.Editor, game, PluginFileName);
+                return ToolResult.Json(new
+                {
+                    ok = true,
+                    enabled = false,
+                    wasEnabled,
+                    note = "Call save_project to persist this.",
                 });
             },
         };
