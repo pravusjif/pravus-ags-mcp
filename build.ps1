@@ -29,9 +29,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
-. "$root\tools\LocalProps.ps1"
+. "$root\tools\SmokeGame.ps1"  # also dot-sources LocalProps.ps1
 if (-not $AgsDir) { $AgsDir = Get-LocalProp AgsDir }
-if (-not $Game) { $Game = Get-LocalProp SmokeGame }
 
 if (-not $AgsDir -or -not (Test-Path (Join-Path $AgsDir "AGSEditor.exe"))) {
     throw "AGSEditor.exe not found in '$AgsDir'. Set AgsDir in Local.props (copy Local.props.example) or pass -AgsDir <path to your AGS 3.6 folder>."
@@ -128,9 +127,7 @@ if ($Deploy) {
 if ($Run) {
     $editor = Join-Path $AgsDir "AGSEditor.exe"
     if (-not $Game) { $Game = Get-SmokeGame $AgsDir }
-    if (-not (Test-Path $Game)) { Write-Warning "Game '$Game' not found; starting the editor with no game open." }
-    # Start-Process rejects an empty -ArgumentList, so pass it only when there is a game to open.
-    if (Test-Path $Game) { Start-Process $editor -ArgumentList "`"$Game`"" -WorkingDirectory $AgsDir }
-    else { Start-Process $editor -WorkingDirectory $AgsDir }
+    if (-not (Test-Path $Game)) { throw "Game '$Game' not found." }
+    Start-Process $editor -ArgumentList "`"$Game`"" -WorkingDirectory $AgsDir
     Write-Host "Started the AGS editor. MCP endpoint: http://127.0.0.1:7471/mcp" -ForegroundColor Green
 }

@@ -8,7 +8,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 
 ## Checklist
 
-- [ ] 1. Housekeeping: installer repo name, package hygiene, `SmokeGame` setting, headless-compile fallback in the skill — everything but the live gate landed in "Housekeeping: installer repo name, SmokeGame, package hygiene, headless compile"; open: run `.\build.ps1 -Deploy -StopEditor -Run` and call `project_info` (decision 16 removed the owner blockers).
+- [x] 1. Housekeeping: installer repo name, package hygiene, `SmokeGame` setting, headless-compile fallback in the skill — landed in "Housekeeping: installer repo name, SmokeGame, package hygiene, headless compile"; live gate passed in "build.ps1 -Run: load SmokeGame.ps1, live gate for housekeeping".
 - [ ] 2. Script hygiene: CRLF everywhere, `staleOnDisk` detection, `reload_script`
 - [ ] 3. `batch` tool and `outPath` on the image tools
 - [ ] 4. `list_sprites`, `create_sprite_folder`, `move_script_module`
