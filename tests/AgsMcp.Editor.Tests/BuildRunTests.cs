@@ -101,8 +101,22 @@ namespace AgsMcp.Editor.Tests
         public void SliceLog_HandlesEmpty()
         {
             var s = BuildRunTools.SliceLog("", 0, 500);
-            Assert.Equal(1, s.TotalLines); // one empty line
-            Assert.Equal(new[] { "" }, s.Lines.ToArray());
+            Assert.Equal(0, s.TotalLines);
+            Assert.Empty(s.Lines);
+            Assert.Equal(0, s.NextLine);
+            Assert.Equal(new[] { "" }, BuildRunTools.SliceLog("\n", 0, 500).Lines.ToArray()); // one empty line
+        }
+
+        [Fact]
+        public void SliceLog_TrailingNewlineEndsTheLastLine_SoAPollSeesTheNextLine()
+        {
+            // The engine writes "message\n" and flushes, so the file always ends with a newline.
+            var first = BuildRunTools.SliceLog("a\r\nb\r\n", 0, 500);
+            Assert.Equal(2, first.TotalLines);
+            Assert.Equal(new[] { "a", "b" }, first.Lines.ToArray());
+            var next = BuildRunTools.SliceLog("a\r\nb\r\nc\r\n", first.NextLine, 500);
+            Assert.Equal(new[] { "c" }, next.Lines.ToArray());
+            Assert.Equal(3, next.NextLine);
         }
     }
 }

@@ -344,11 +344,41 @@ static jm::Value handle_command(const std::string& cmd, const jm::Value& args) {
         return r;
     }
     if (cmd == "hover_name") {
+        // GetLocationName takes screen coordinates; room=1 converts room coordinates first (as process_click does).
+        int32 x = argi(args, "x"), y = argi(args, "y");
+        if (argi(args, "room", 0)) engine->RoomToViewport(&x, &y);
         char buf[256];
         buf[0] = 0;
-        if (fn_getlocationname) fn_getlocationname(argi(args, "x"), argi(args, "y"), buf);
+        if (fn_getlocationname) fn_getlocationname(x, y, buf);
         r.set("ok", true);
         r.set("name", safe_str(buf, sizeof(buf)));
+        r.set("screenX", (int)x);
+        r.set("screenY", (int)y);
+        return r;
+    }
+    if (cmd == "text_extent") {
+        // One line in the game's text encoding: 'bytes' (codepage bytes for a non-Unicode game) or 'text' (UTF-8).
+        int font = argi(args, "font", 0);
+        if (engine->GetFontType(font) == FNT_INVALID) {
+            r.set("ok", false);
+            r.set("error", "no font " + std::to_string((long long)font) + " in the running game");
+            return r;
+        }
+        std::string text;
+        if (args.type == jm::Type::Obj) {
+            const jm::Value* bv = args.find("bytes");
+            const jm::Value* tv = args.find("text");
+            if (bv && bv->type == jm::Type::Arr) {
+                for (const jm::Value& b : bv->arr) text.push_back((char)(unsigned char)b.as_int());
+            } else if (tv) {
+                text = tv->as_str();
+            }
+        }
+        int32 w = 0, h = 0;
+        engine->GetTextExtent(font, text.c_str(), &w, &h);
+        r.set("ok", true);
+        r.set("width", (int)w);
+        r.set("height", (int)h);
         return r;
     }
     if (cmd == "get_global_int") {
@@ -380,9 +410,12 @@ static jm::Value handle_command(const std::string& cmd, const jm::Value& args) {
                 if (n > 2) n = 2;
             }
         }
-        engine->QueueGameScriptFunction(name.c_str(), 1, n, a1, a2);
+        // globalScript 1 = GlobalScript.asc, 0 = the current room's script.
+        int global = argi(args, "globalScript", 1) ? 1 : 0;
+        engine->QueueGameScriptFunction(name.c_str(), global, n, a1, a2);
         r.set("ok", true);
         r.set("queued", true);
+        r.set("globalScript", global != 0);
         return r;
     }
 

@@ -748,7 +748,7 @@ namespace AgsMcp.Editor.Tools
         }
 
         /// <summary>A mask bitmap's area numbers as [y, x]. Masks export as 8-bit indexed (pixel = area).</summary>
-        private static byte[,] ReadMask(Bitmap bmp)
+        internal static byte[,] ReadMask(Bitmap bmp)
         {
             var result = new byte[bmp.Height, bmp.Width];
             if (bmp.PixelFormat == PixelFormat.Format8bppIndexed)

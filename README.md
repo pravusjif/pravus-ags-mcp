@@ -256,7 +256,7 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | `run_game([startRoom], [rebuild], [mode])` | Build as `build_game` does (saving first) and launch the game windowed, logging to a file; stops any prior game, or a leftover one running the built exe, before building. |
 | `stop_game` | Stop the running game. |
 | `game_status` | Running/exited, pid, exit code, uptime, log path. |
-| `get_game_log([sinceLine], [limit])` | Tail the engine log with a `nextLine` cursor. |
+| `get_game_log([sinceLine], [limit])` | Tail the engine log with a `nextLine` cursor (the next line the engine writes). |
 
 ### Player simulation (needs `agsmcp.dll`)
 | Tool | Description |
@@ -272,7 +272,9 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | `game_hover_name(x, y)` | The name of whatever is at a screen point. |
 | `game_wait_until(condition, [room], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or time out. |
 | `game_get_global_int(index)` / `game_set_global_int(index, value)` | Read/write a legacy GlobalInt. |
-| `game_call_function(name, [args])` | Queue a function defined in GlobalScript.asc (0–2 integer args; refused if GlobalScript does not define it). Keep it non-blocking. |
+| `game_call_function(name, [args], [roomScript])` | Queue a function defined in GlobalScript.asc, or with `roomScript=true` in the current room's `roomN.asc` (0–2 integer args; refused if that script does not define it). Keep it non-blocking. |
+| `game_text_extent(font, text)` | Width and height of one line as the running game draws it (engine `GetTextExtent`; TTF fonts too). |
+| `game_run_interaction(target, mode, [inventory])` | Click a hotspot, object or character of the current room (`hotspot:N`, `object:oName`, `character:cName`…) in a cursor mode: the point comes from the mask or sprite, is confirmed with the hover name, then a click is queued. Refuses rather than mis-clicking. |
 
 ## Testing
 

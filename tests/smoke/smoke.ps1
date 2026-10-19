@@ -217,7 +217,7 @@ try {
         $r.save.saved -and ($r.changed -contains "Name")
     }
     Check "create_room_object adds an object" {
-        $r = Get-Json (Invoke-Mcp "create_room_object" @{ number = 2; properties = @{ Name = "oSmoke"; Image = 0; StartX = 200; StartY = 170 } })
+        $r = Get-Json (Invoke-Mcp "create_room_object" @{ number = 2; properties = @{ Name = "oSmoke"; Description = "Smoke pot"; Image = 0; StartX = 200; StartY = 170 } })
         $r.created -and $r.name -eq "oSmoke"
     }
     Check "set_room_event binds hSmoke Look and adds a stub" {
@@ -226,7 +226,8 @@ try {
     }
     Check "room script is readable, editable and compiles" {
         $t = (Get-Json (Invoke-Mcp "read_script" @{ name = "room2" })).text
-        Invoke-Mcp "edit_script" @{ name = "room2"; find = "function hSmoke_Look(Hotspot *theHotspot, CursorMode mode)`n{`n"; replace = "function hSmoke_Look(Hotspot *theHotspot, CursorMode mode)`n{`n  player.Say(`"smoke`");`n" } | Out-Null
+        # MCP_RoomPing is for game_call_function roomScript=true; MCPLOOK shows game_run_interaction ran the Look event.
+        Invoke-Mcp "edit_script" @{ name = "room2"; find = "function hSmoke_Look(Hotspot *theHotspot, CursorMode mode)`n{`n"; replace = "function MCP_RoomPing()`n{`n  System.Log(eLogInfo, `"MCPROOM`");`n}`n`nfunction hSmoke_Look(Hotspot *theHotspot, CursorMode mode)`n{`n  System.Log(eLogInfo, `"MCPLOOK`");`n  player.Say(`"smoke`");`n" } | Out-Null
         $c = Get-Json (Invoke-Mcp "compile" @{ name = "room2" })
         ($t -match "hSmoke_Look") -and $c.ok
     }
@@ -454,7 +455,9 @@ try {
         $t = (Get-Json (Invoke-Mcp "read_script" @{ name = "GlobalScript" })).text
         $hooked = [regex]::Replace($t, '(function on_key_press\([^)]*\)\s*\{)', "`$1`r`n  System.Log(eLogInfo, `"MCPKEY %d`", keycode);", 1)
         $hooked += "`r`nfunction on_text_input(int ch)`r`n{`r`n  System.Log(eLogInfo, `"MCPTXT %d`", ch);`r`n}`r`n" +
-                   "`r`nfunction MCP_Quit()`r`n{`r`n  QuitGame(0);`r`n}`r`n"
+                   "`r`nfunction MCP_Quit()`r`n{`r`n  QuitGame(0);`r`n}`r`n" +
+                   "`r`nfunction MCP_Room(int n)`r`n{`r`n  player.ChangeRoom(n);`r`n}`r`n" +
+                   "`r`nfunction MCP_HidePopups()`r`n{`r`n  for (int i = 0; i < Game.GUICount; i++)`r`n  {`r`n    if (gui[i].PopupStyle == eGUIPopupModal) gui[i].Visible = false;`r`n  }`r`n}`r`n"
         Invoke-Mcp "write_script" @{ name = "GlobalScript"; text = $hooked } | Out-Null
         $c = Get-Json (Invoke-Mcp "compile")
         $hooked -ne $t -and $c.ok -eq $true
@@ -532,6 +535,52 @@ try {
         Start-Sleep -Milliseconds 800
         $lines = (Get-GameLogSince $since).lines
         $t.units -eq 2 -and ($lines -match "MCPTXT 72") -and ($lines -match "MCPTXT 105")
+    }
+    Check "game_text_extent measures 'Hi' in font 0 as measure_text does" {
+        $e = Get-Json (Invoke-Mcp "game_text_extent" @{ font = 0; text = "Hi" })
+        $m = Get-Json (Invoke-Mcp "measure_text" @{ font = 0; text = "Hi" })
+        Write-Host ("    engine {0}x{1}, measure_text width {2}" -f $e.width, $e.height, $m.width) -ForegroundColor DarkGray
+        $e.width -gt 0 -and $e.height -gt 0 -and $e.width -eq $m.width
+    }
+    # The template's F7 opens its restore dialog, a modal popup that pauses the game and covers the room.
+    Check "game_call_function MCP_HidePopups closes the dialog F7 opened and unpauses the game" {
+        Invoke-Mcp "game_call_function" @{ name = "MCP_HidePopups" } | Out-Null
+        Start-Sleep -Milliseconds 500
+        (Get-Json (Invoke-Mcp "game_state")).paused -eq 0
+    }
+    Check "game_call_function MCP_Room(2) takes the player to room 2" {
+        Invoke-Mcp "game_call_function" @{ name = "MCP_Room"; args = @(2) } | Out-Null
+        (Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "room"; room = 2; timeoutMs = 15000 })).met -eq $true
+    }
+    Check "game_call_function roomScript=true runs a room2.asc function" {
+        $since = (Get-GameLogSince 0).nextLine
+        $r = Get-Json (Invoke-Mcp "game_call_function" @{ name = "MCP_RoomPing"; roomScript = $true })
+        Start-Sleep -Milliseconds 800
+        $lines = (Get-GameLogSince $since).lines
+        $r.queued -eq $true -and $r.globalScript -eq $false -and $r.room -eq 2 -and ($lines -match "MCPROOM")
+    }
+    Check "game_call_function roomScript=true refuses a GlobalScript-only function" {
+        try { Invoke-Mcp "game_call_function" @{ name = "MCP_Quit"; roomScript = $true } | Out-Null; $false }
+        catch { $_.Exception.Message -match "room2.asc defines no function" }
+    }
+    Check "game_run_interaction hotspot:hSmoke mode=1 runs its Look event and the game gets ready" {
+        $since = (Get-GameLogSince 0).nextLine
+        $r = Get-Json (Invoke-Mcp "game_run_interaction" @{ target = "hotspot:hSmoke"; mode = 1 } 120)
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "ready"; timeoutMs = 20000 })
+        Write-Host ("    point {0},{1} after {2} tried" -f $r.point.x, $r.point.y, $r.tried) -ForegroundColor DarkGray
+        $r.hoverName -eq "Smoke" -and $r.queued -eq $true -and $w.met -eq $true -and ((Get-GameLogSince $since).lines -match "MCPLOOK")
+    }
+    Check "game_run_interaction object:oSmoke and character:cEgo (Walk) find their sprites" {
+        $o = Get-Json (Invoke-Mcp "game_run_interaction" @{ target = "object:oSmoke"; mode = 0 } 120)
+        $w1 = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "ready"; timeoutMs = 20000 })
+        $c = Get-Json (Invoke-Mcp "game_run_interaction" @{ target = "character:cEgo"; mode = 0 } 120)
+        $w2 = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "ready"; timeoutMs = 20000 })
+        Write-Host ("    object at {0},{1} ({2} tried), character at {3},{4} ({5} tried)" -f $o.point.x, $o.point.y, $o.tried, $c.point.x, $c.point.y, $c.tried) -ForegroundColor DarkGray
+        $o.hoverName -eq "Smoke pot" -and $o.queued -and $w1.met -and $c.hoverName -eq $w1.state.player.name -and $c.queued -and $w2.met
+    }
+    Check "game_run_interaction refuses a missing hotspot" {
+        try { Invoke-Mcp "game_run_interaction" @{ target = "hotspot:hNoSuch"; mode = 1 } 120 | Out-Null; $false }
+        catch { $_.Exception.Message -match "no hotspot 'hNoSuch'" }
     }
     Check "stop_game stops the game" { (Get-Json (Invoke-Mcp "stop_game")).stopped -eq $true }
     Check "a game that calls QuitGame exits within 3 s while the bridge is connected" {

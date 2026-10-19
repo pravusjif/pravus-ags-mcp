@@ -342,10 +342,16 @@ namespace AgsMcp.Editor.Tools
             public List<string> Lines = new List<string>();
         }
 
-        /// <summary>Splits log text into lines and returns [sinceLine, sinceLine+maxLines). NextLine lets callers poll.</summary>
+        /// <summary>
+        /// Splits log text into lines and returns [sinceLine, sinceLine+maxLines). NextLine lets callers poll. A final
+        /// newline ends the last line instead of starting an empty one: the engine writes "message\n" and flushes, so
+        /// counting that empty tail made NextLine point past the next line written and a poll skipped it.
+        /// </summary>
         internal static LogSlice SliceLog(string text, int sinceLine, int maxLines)
         {
-            string[] lines = (text ?? string.Empty).Replace("\r\n", "\n").Split('\n');
+            string normalized = (text ?? string.Empty).Replace("\r\n", "\n");
+            string[] lines = normalized.Length == 0 ? new string[0]
+                           : (normalized.EndsWith("\n", StringComparison.Ordinal) ? normalized.Substring(0, normalized.Length - 1) : normalized).Split('\n');
             int total = lines.Length;
             int from = Math.Min(Math.Max(0, sinceLine), total);
             int end = Math.Min(total, from + Math.Max(1, maxLines));

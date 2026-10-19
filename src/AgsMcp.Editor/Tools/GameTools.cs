@@ -35,6 +35,8 @@ namespace AgsMcp.Editor.Tools
             yield return GameGetGlobalInt(ctx, client);
             yield return GameSetGlobalInt(ctx, client);
             yield return GameCallFunction(ctx, client);
+            yield return GameTextExtent(ctx, client);
+            yield return GameRunInteraction(ctx, client);
         }
 
         internal const string PluginFileName = "agsmcp.dll";
@@ -360,14 +362,17 @@ namespace AgsMcp.Editor.Tools
         {
             Name = "game_call_function",
             Title = "Call a game script function",
-            Description = "Queue a global-script function to run in the game as soon as the engine is able to (script " +
-                          "QueueGameScriptFunction). Pass 0-2 integer arguments. Only functions defined in GlobalScript.asc " +
-                          "are reachable (refused otherwise; a hook in another module needs a GlobalScript wrapper). Keep the " +
-                          "function non-blocking (no Say, Display, Wait or eBlock walks): it runs inside the engine's frame " +
-                          "hook. To read values back, have it System.Log a line and read it with get_game_log.",
+            Description = "Queue a script function to run in the game as soon as the engine is able to (script " +
+                          "QueueGameScriptFunction). Pass 0-2 integer arguments. By default the function must be defined in " +
+                          "GlobalScript.asc; with roomScript=true it runs in the current room's script instead and must be " +
+                          "defined in that room's roomN.asc on disk. Functions in other modules are not reachable (refused; " +
+                          "add a GlobalScript wrapper). Keep the function non-blocking (no Say, Display, Wait or eBlock walks): " +
+                          "it runs inside the engine's frame hook. To read values back, have it System.Log a line and read it " +
+                          "with get_game_log.",
             InputSchema = Schema.Object()
-                .Required("name", Schema.String("Global-script function name, e.g. \"my_function\"."))
+                .Required("name", Schema.String("Function name, e.g. \"my_function\"."))
                 .Optional("args", Schema.ArrayOf(Schema.Integer("An integer argument."), "Up to 2 integer arguments."))
+                .Optional("roomScript", Schema.Boolean("Run it in the current room's script instead of GlobalScript (default false)."))
                 .Build(),
             Annotations = ToolAnnotations.Mutating,
             RunOnUiThread = false,
@@ -375,19 +380,239 @@ namespace AgsMcp.Editor.Tools
             {
                 RequireRunning(ctx);
                 string name = args.String("name").Trim();
-                // The engine drops a call to a missing function silently, so check the editor's GlobalScript first.
-                // The running game was built from an earlier save, so this is a guard, not a guarantee.
-                Script global = ctx.RequireGame().ScriptsAndHeaders
-                    .Select(sh => sh.Script)
-                    .FirstOrDefault(s => s != null && s.FileName == Script.GLOBAL_SCRIPT_FILE_NAME);
-                if (global != null && !ScriptText.DefinesFunction(global.Text, name))
-                    throw new ToolException($"GlobalScript.asc defines no function '{name}'. game_call_function only reaches " +
-                                            "GlobalScript functions; define one there (it may forward to a module) and rebuild.");
-                var a = new JObject { ["name"] = name };
+                bool roomScript = args.Bool("roomScript", false);
+                // The engine drops a call to a missing function silently, so check the script first. The running game
+                // was built from an earlier save, so this is a guard, not a guarantee.
+                Game game = ctx.RequireGame();
+                int? room = null;
+                if (roomScript)
+                {
+                    room = (int?)Ok(client.Send("state", null))["room"];
+                    if (!room.HasValue) throw new ToolException("The game did not report its current room.");
+                    string file = Path.Combine(game.DirectoryPath, "room" + room.Value + ".asc");
+                    if (!File.Exists(file))
+                        throw new ToolException($"The game is in room {room.Value}, but '{file}' does not exist.");
+                    if (!ScriptText.DefinesFunction(File.ReadAllText(file), name))
+                        throw new ToolException($"room{room.Value}.asc defines no function '{name}'. With roomScript=true " +
+                                                "game_call_function only reaches functions of the room the game is in.");
+                }
+                else
+                {
+                    Script global = game.ScriptsAndHeaders
+                        .Select(sh => sh.Script)
+                        .FirstOrDefault(s => s != null && s.FileName == Script.GLOBAL_SCRIPT_FILE_NAME);
+                    if (global != null && !ScriptText.DefinesFunction(global.Text, name))
+                        throw new ToolException($"GlobalScript.asc defines no function '{name}'. game_call_function only reaches " +
+                                                "GlobalScript functions (or, with roomScript=true, the current room's); define one " +
+                                                "there (it may forward to a module) and rebuild.");
+                }
+                var a = new JObject { ["name"] = name, ["globalScript"] = roomScript ? 0 : 1 };
                 if (args.Has("args")) a["args"] = args.Array("args");
-                return ToolResult.Json(Ok(client.Send("call_function", a)));
+                JObject resp = Ok(client.Send("call_function", a));
+                if (room.HasValue) resp["room"] = room.Value;
+                return ToolResult.Json(resp);
             },
         };
+
+        private static Tool GameTextExtent(ToolContext ctx, EngineClient client) => new Tool
+        {
+            Name = "game_text_extent",
+            Title = "Measure text in the game",
+            Description = "Measure one line of text in a font as the running game draws it (engine GetTextExtent): width " +
+                          "and height in game pixels, outline included. No wrapping; '[' is not a line break here. Works for " +
+                          "TTF fonts too, unlike measure_text, but needs the game running with the engine plugin.",
+            InputSchema = Schema.Object()
+                .Required("font", Schema.Integer("Font number (0-based)."))
+                .Required("text", Schema.String("The line to measure."))
+                .Build(),
+            Annotations = ToolAnnotations.ReadOnlyTool,
+            RunOnUiThread = false,
+            Handler = args =>
+            {
+                RequireRunning(ctx);
+                Game game = ctx.RequireGame();
+                string text = args.String("text");
+                var a = new JObject { ["font"] = args.Int("font") };
+                // A non-Unicode game reads text as codepage bytes; the bridge carries JSON (UTF-8), so send the bytes.
+                if (game.UnicodeMode) a["text"] = text;
+                else a["bytes"] = new JArray(game.TextEncoding.GetBytes(text).Select(b => (int)b));
+                JObject resp = Ok(client.Send("text_extent", a));
+                return ToolResult.Json(new { font = args.Int("font"), text, width = (int)resp["width"], height = (int)resp["height"] });
+            },
+        };
+
+        private static Tool GameRunInteraction(ToolContext ctx, EngineClient client) => new Tool
+        {
+            Name = "game_run_interaction",
+            Title = "Run an interaction in the game",
+            Description = "Click a hotspot, object or character of the current room in a cursor mode, as a player would, " +
+                          "without knowing its coordinates. target is \"hotspot:N\", \"object:N\", \"character:N\" (N = ID or " +
+                          "script name) or a bare script name. The point comes from editor data: a hotspot's mask centroid, an " +
+                          "object's or character's current sprite box. Up to 8 points are checked with hover_name until one " +
+                          "reports the target's name, then a click in 'mode' is queued there (as game_process_click). Refused " +
+                          "when no point reports the target (covered by a character or GUI, off-screen, hidden) or while the " +
+                          "interface is disabled. Returns at once; follow with game_wait_until ready. Loads the room in the editor " +
+                          "for hotspots and objects.",
+            InputSchema = Schema.Object()
+                .Required("target", Schema.String("\"hotspot:N\", \"object:N\", \"character:N\" (ID or script name), or a script name."))
+                .Required("mode", Schema.Integer("Cursor mode number as defined by the game (templates: 0 Walk, 1 Look, 2 Interact, 3 Talk, 4 UseInv)."))
+                .Optional("inventory", Schema.Integer("Inventory item ID to make active before clicking (for UseInv)."))
+                .Build(),
+            Annotations = ToolAnnotations.Mutating,
+            Timeout = TimeSpan.FromSeconds(90),
+            Handler = args =>
+            {
+                RequireRunning(ctx);
+                Game game = ctx.RequireGame();
+                InteractionTarget target = InteractionTarget.Parse(args.String("target"));
+                int mode = args.Int("mode");
+                JObject state = Ok(client.Send("state", null));
+                int room = (int)state["room"];
+                if (state["interfaceEnabled"] != null && (int)state["interfaceEnabled"] == 0)
+                    throw new ToolException("The game's interface is disabled (a blocking action or cutscene is running), so a click " +
+                                            "would be ignored. Wait with game_wait_until condition=ready, then retry.");
+
+                string label, expected;
+                List<MaskPoint> points = InteractionPoints(ctx, game, state, room, target, out label, out expected);
+                if (string.IsNullOrEmpty(expected))
+                    throw new ToolException($"{label} has no name, so hover_name cannot confirm a point on it. Give it a description.");
+                if (points.Count == 0)
+                    throw new ToolException($"{label} has no visible pixels in room {room} to click.");
+
+                var tried = new List<object>();
+                foreach (MaskPoint p in points)
+                {
+                    JObject hover = Ok(client.Send("hover_name", new JObject { ["x"] = p.X, ["y"] = p.Y, ["room"] = 1 }));
+                    string name = (string)hover["name"] ?? "";
+                    tried.Add(new { x = p.X, y = p.Y, hoverName = name });
+                    if (name != expected) continue;
+
+                    var click = new JObject { ["x"] = p.X, ["y"] = p.Y, ["mode"] = mode, ["inventory"] = args.Int("inventory", 0) };
+                    JObject resp = Ok(client.Send("process_click", click));
+                    return ToolResult.Json(new
+                    {
+                        target = label,
+                        room,
+                        mode,
+                        point = new { x = p.X, y = p.Y },
+                        screen = new { x = (int?)hover["screenX"], y = (int?)hover["screenY"] },
+                        hoverName = name,
+                        queued = (bool?)resp["queued"] ?? false,
+                        tried = tried.Count,
+                    });
+                }
+                throw new ToolException($"No sampled point on {label} reports '{expected}' (tried {Newtonsoft.Json.JsonConvert.SerializeObject(tried)}). " +
+                                        "It may be covered by a character, object or GUI, off-screen, hidden, or renamed at run time; " +
+                                        "click it yourself with game_process_click.");
+            },
+        };
+
+        /// <summary>Candidate room points on the target, best first, and the name hover_name must report there.</summary>
+        private static List<MaskPoint> InteractionPoints(ToolContext ctx, Game game, JObject state, int roomNumber, InteractionTarget target,
+                                                         out string label, out string expected)
+        {
+            const int MaxSamples = 8;
+            string kind = target.Kind;
+            Room room = null;
+            if (kind != "character")
+            {
+                room = RoomSession.Open(ctx, roomNumber);
+                if (kind == null)
+                {
+                    // A bare script name: a hotspot or object of this room, else a character.
+                    if (room.Hotspots.Any(h => NameIs(h.Name, target.Name))) kind = "hotspot";
+                    else if (room.Objects.Any(o => NameIs(o.Name, target.Name))) kind = "object";
+                    else kind = "character";
+                }
+            }
+
+            if (kind == "hotspot")
+            {
+                RoomHotspot hs = room.Hotspots.FirstOrDefault(h => target.Id.HasValue ? h.ID == target.Id.Value : NameIs(h.Name, target.Name))
+                                 ?? throw new ToolException($"Room {roomNumber} has no hotspot {target.Text}.");
+                if (hs.ID == 0) throw new ToolException("Hotspot 0 is 'no hotspot' and cannot be clicked.");
+                label = "hotspot:" + hs.ID + " (" + hs.Name + ")";
+                expected = hs.Description;
+                using (Bitmap bmp = EditorInternals.ExportAreaMask(room, RoomAreaMaskType.Hotspots))
+                {
+                    byte[,] mask = RoomTools.ReadMask(bmp);
+                    int factor = Math.Max(1, room.Width / Math.Max(1, mask.GetLength(1)));
+                    return MaskGeometry.SamplePoints(mask, hs.ID, MaxSamples)
+                        .Select(p => new MaskPoint(p.X * factor + factor / 2, p.Y * factor + factor / 2)).ToList();
+                }
+            }
+
+            if (kind == "object")
+            {
+                RoomObject obj = room.Objects.FirstOrDefault(o => target.Id.HasValue ? o.ID == target.Id.Value : NameIs(o.Name, target.Name))
+                                 ?? throw new ToolException($"Room {roomNumber} has no object {target.Text}.");
+                label = "object:" + obj.ID + " (" + obj.Name + ")";
+                expected = obj.Description;
+                JObject live = (state["objects"] as JArray)?.OfType<JObject>().FirstOrDefault(o => (int)o["id"] == obj.ID)
+                               ?? throw new ToolException($"The running game reports no object {obj.ID} in room {roomNumber}; rebuild the game.");
+                if ((int)live["visible"] == 0) throw new ToolException($"{label} is not visible in the running game.");
+                Sprite sprite = SpriteOf(game, (int)live["sprite"], label);
+                int x = (int)live["x"], y = (int)live["y"];
+                // An object's x/y is its bottom-left corner.
+                return MaskGeometry.RectSamplePoints(x, y - sprite.Height, sprite.Width, sprite.Height, MaxSamples);
+            }
+
+            JObject ch = (state["characters"] as JArray)?.OfType<JObject>().FirstOrDefault(c =>
+                             target.Id.HasValue ? (int)c["id"] == target.Id.Value : NameIs((string)c["scriptName"], target.Name))
+                         ?? throw new ToolException($"No character {target.Text} in the running game.");
+            label = "character:" + (int)ch["id"] + " (" + (string)ch["scriptName"] + ")";
+            expected = (string)ch["name"];
+            if ((int)ch["room"] != roomNumber) throw new ToolException($"{label} is in room {(int)ch["room"]}, not in the current room {roomNumber}.");
+            if ((int)ch["on"] == 0) throw new ToolException($"{label} is hidden (Character.on is 0).");
+            int view = (int)ch["view"], loop = (int)ch["loop"], frame = (int)ch["frame"];
+            View v = game.RootViewFolder.AllItemsFlat.FirstOrDefault(i => i.ID == view)
+                     ?? throw new ToolException($"{label} shows view {view}, which the editor does not have.");
+            ViewFrame f = v.Loops.FirstOrDefault(l => l.ID == loop)?.Frames.FirstOrDefault(fr => fr.ID == frame)
+                          ?? throw new ToolException($"{label} shows view {view} loop {loop} frame {frame}, which the editor does not have.");
+            Sprite s = SpriteOf(game, f.Image, label);
+            int cx = (int)ch["x"], cy = (int)ch["y"];
+            // A character's x/y is the middle of its feet; character scaling is not taken into account.
+            return MaskGeometry.RectSamplePoints(cx - s.Width / 2, cy - s.Height, s.Width, s.Height, MaxSamples);
+        }
+
+        private static Sprite SpriteOf(Game game, int number, string label) =>
+            game.RootSpriteFolder.FindSpriteByID(number, true)
+            ?? throw new ToolException($"{label} shows sprite {number}, which the editor does not have.");
+
+        private static bool NameIs(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>A game_run_interaction target: Kind is hotspot/object/character or null (a bare script name).</summary>
+        internal sealed class InteractionTarget
+        {
+            public string Kind;
+            public int? Id;
+            public string Name;
+            public string Text => Id.HasValue ? Id.Value.ToString() : "'" + Name + "'";
+
+            internal static InteractionTarget Parse(string target)
+            {
+                string s = (target ?? "").Trim();
+                if (s.Length == 0) throw new ToolException("'target' is required, e.g. \"hotspot:1\", \"object:oKey\" or \"cGuard\".");
+                int colon = s.IndexOf(':');
+                string kind = null, rest = s;
+                if (colon >= 0)
+                {
+                    kind = s.Substring(0, colon).Trim().ToLowerInvariant();
+                    rest = s.Substring(colon + 1).Trim();
+                    if (kind == "char") kind = "character";
+                    if (kind != "hotspot" && kind != "object" && kind != "character")
+                        throw new ToolException($"Unknown target kind '{kind}'. Use hotspot:N, object:N or character:N (ID or script name).");
+                }
+                if (int.TryParse(rest, out int id) && id >= 0)
+                {
+                    if (kind == null) throw new ToolException($"A bare number is ambiguous; use \"hotspot:{id}\", \"object:{id}\" or \"character:{id}\".");
+                    return new InteractionTarget { Kind = kind, Id = id };
+                }
+                if (!System.Text.RegularExpressions.Regex.IsMatch(rest, "^[A-Za-z_][A-Za-z0-9_]*$"))
+                    throw new ToolException($"Could not read a target from '{target}'. Use hotspot:N, object:N, character:N or a script name.");
+                return new InteractionTarget { Kind = kind, Name = rest };
+            }
+        }
 
         // ---- helpers ----
 
