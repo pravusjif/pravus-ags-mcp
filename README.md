@@ -1,4 +1,4 @@
-# AGS MCP Server
+# Pravus AGS MCP Server
 
 An [MCP](https://modelcontextprotocol.io) server that runs **inside the Adventure Game Studio 3.6 editor**
 as a plugin. It lets any MCP client (Claude Code, Codex, Gemini CLI, …) work with the project you have open in the editor:
