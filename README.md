@@ -173,7 +173,7 @@ take is refused, with the list of the ones it does.
 | `batch(calls, [stopOnError])` | Run several tool calls `[{name, arguments}]` in order in one request; returns each call's `ok` and `content` or `error` (JSON text parsed, images replaced by a note). Stops at the first failure unless `stopOnError=false`. |
 | `create_project(folder, [template], [gameName], [fileName], [saveCurrent])` | Create a game from an editor template (Sierra-style, Empty Game, …) in a new or empty folder and open it. |
 | `open_project(path, [saveCurrent])` | Open another game (`Game.agf` or its folder) in the editor. |
-| `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, audiofolder, globalvariable, customproperty). |
+| `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, guicontrol, view, cursor, font, audioclip, audiocliptype, audiofolder, globalvariable, customproperty). |
 | `find_usages(name, [limit])` | Whole-word search for an identifier across script modules, room scripts and dialog scripts. |
 
 ### Game data
@@ -184,7 +184,10 @@ take is refused, with the list of the ones it does.
 | `create_entity(type, [properties])` | Create a character, inventory item, dialog, gui, view, cursor, audio type, audio folder, global variable or custom-property definition. Properties that fit nothing are listed in `ignored`. |
 | `delete_entity(type, id)` | Delete an entity and renumber IDs as the editor does. |
 | `get_dialog_script(id)` / `set_dialog_script(id, [script], [options])` | Read/write a dialog's options (`{text, show, say}`) and its dialog-script text. |
-| `set_event(type, id, event, [function])` | Bind a character or inventory event (Look, Interact, Talk, UseInv, …) and add a stub to GlobalScript. |
+| `set_event(type, id, event, [function])` | Bind a character, inventory, GUI or GUI-control event (Look, Interact, Talk, UseInv, …, OnClick) and add a stub to GlobalScript. |
+| `list_gui_controls(gui)` | A GUI's controls with ID, name, type, position, size and bound events. A control is `type=guicontrol id="<gui>:<control>"` in the property and event tools. |
+| `create_gui_control(gui, type, [x], [y], [width], [height], [properties])` | Add a button, label, text box, list box, slider or inventory window to a GUI, as the GUI editor does. |
+| `delete_gui_control(gui, control)` | Delete a control; higher control IDs move down. |
 | `setting` (as a `*_properties` type) | The game-wide Settings object is addressable like an entity. |
 
 ### Scripts

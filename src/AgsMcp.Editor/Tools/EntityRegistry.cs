@@ -29,6 +29,11 @@ namespace AgsMcp.Editor.Tools
         public Func<Game, object, string, JToken, JToken> PrepareProperty;
         /// <summary>Optional follow-up after an entity of this kind is created, changed or deleted (refresh the editor).</summary>
         public Action<Game> AfterChange;
+        /// <summary>
+        /// Optional resolver for ids that matching IdOf/NameOf cannot handle (a guicontrol's "gMain:0" mixes a name and
+        /// an index). Returns the entity or throws a ToolException. Null: match IdOf/NameOf.
+        /// </summary>
+        public Func<Game, string, object> ResolveId;
     }
 
     internal static class EntityRegistry
@@ -49,6 +54,7 @@ namespace AgsMcp.Editor.Tools
             if (idToken == null || idToken.Type == JTokenType.Null)
                 throw new ToolException("An 'id' (numeric ID or script name) is required.");
             string want = idToken.Type == JTokenType.Integer ? idToken.Value<long>().ToString() : idToken.ToString();
+            if (kind.ResolveId != null) return kind.ResolveId(game, want);
             foreach (object e in kind.Enumerate(game))
             {
                 if (string.Equals(kind.IdOf(e), want, StringComparison.OrdinalIgnoreCase)) return e;
@@ -142,6 +148,16 @@ namespace AgsMcp.Editor.Tools
                         g.RootGUIFolder.Remove(gui);
                         foreach (GUI x in g.GUIFlatList) if (x.ID > id) x.ID--;
                     },
+                },
+                new EntityKind
+                {
+                    // A control on a GUI, addressed "gui:control" where each side is a name or an index ("gMain:btnOk",
+                    // "2:0"). Created and deleted by create_gui_control/delete_gui_control (GuiTools).
+                    Name = "guicontrol", NameProperty = "Name",
+                    Enumerate = g => g.GUIFlatList.SelectMany(gui => gui.Controls).Cast<object>(),
+                    IdOf = e => ((GUIControl)e).Parent?.ID + ":" + ((GUIControl)e).ID,
+                    NameOf = e => ((GUIControl)e).Parent?.Name + ":" + ((GUIControl)e).Name,
+                    ResolveId = (g, id) => GuiTools.ResolveControl(g, id),
                 },
                 new EntityKind
                 {

@@ -257,6 +257,39 @@ try {
         ($s -match "narrator: Hi\r\n") -and -not ($s -match "[^\r]\n")
     }
 
+    # ---- GUI controls ----
+    Write-Host "GUI controls" -ForegroundColor Cyan
+    Check "create_gui_control adds a button to a template GUI and list_gui_controls shows it" {
+        $guis = (Get-Json (Invoke-Mcp "list_entities" @{ type = "gui" })).entities
+        foreach ($g in $guis) {
+            $l = Get-Json (Invoke-Mcp "list_gui_controls" @{ gui = $g.name })
+            if ($l.guiType -eq "NormalGUI") { $script:smokeGui = $l; break }
+        }
+        $c = Get-Json (Invoke-Mcp "create_gui_control" @{ gui = $script:smokeGui.gui; type = "button"; x = 4; y = 4; properties = @{ Name = "btnSmoke" } })
+        $script:smokeCtrl = $c
+        $l = Get-Json (Invoke-Mcp "list_gui_controls" @{ gui = $script:smokeGui.gui })
+        $c.controlName -eq "btnSmoke" -and $c.controlId -eq $script:smokeGui.count -and
+            ($l.controls | Where-Object { $_.name -eq "btnSmoke" -and $_.type -eq "Button" -and $_.width -eq 40 })
+    }
+    Check "set_properties and get_properties work on a guicontrol" {
+        Invoke-Mcp "set_properties" @{ type = "guicontrol"; id = "$($script:smokeGui.gui):btnSmoke"; properties = @{ Text = "Smoke!" } } | Out-Null
+        $p = Get-Json (Invoke-Mcp "get_properties" @{ type = "guicontrol"; id = $script:smokeCtrl.id })
+        ($p.properties | Where-Object { $_.name -eq "Text" }).value -eq "Smoke!" -and $p.name -eq "$($script:smokeGui.gui):btnSmoke"
+    }
+    Check "set_event guicontrol and gui add OnClick stubs to GlobalScript and compile" {
+        $e = Get-Json (Invoke-Mcp "set_event" @{ type = "guicontrol"; id = "$($script:smokeGui.gui):btnSmoke"; event = "OnClick" })
+        $g = Get-Json (Invoke-Mcp "set_event" @{ type = "gui"; id = $script:smokeGui.gui; event = "Click"; function = "SmokeGui_OnClick" })
+        $text = (Get-Json (Invoke-Mcp "read_script" @{ name = "GlobalScript" })).text
+        $c = Get-Json (Invoke-Mcp "compile")
+        $e.function -eq "btnSmoke_OnClick" -and $e.parameters -eq "GUIControl *control, MouseButton button" -and
+            $text -match "function btnSmoke_OnClick\(GUIControl \*control, MouseButton button\)" -and
+            $text -match "function SmokeGui_OnClick\(GUI \*theGui, MouseButton button\)" -and $c.ok
+    }
+    Check "delete_gui_control removes the button" {
+        $d = Get-Json (Invoke-Mcp "delete_gui_control" @{ gui = $script:smokeGui.gui; control = "btnSmoke" })
+        $l = Get-Json (Invoke-Mcp "list_gui_controls" @{ gui = $script:smokeGui.gui })
+        $d.deleted -and -not ($l.controls | Where-Object { $_.name -eq "btnSmoke" }) -and $l.count -eq $script:smokeGui.count
+    }
     # ---- Assets ----
     Write-Host "Assets" -ForegroundColor Cyan
     $newSprite = $null
