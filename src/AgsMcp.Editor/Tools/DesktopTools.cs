@@ -19,7 +19,7 @@ namespace AgsMcp.Editor.Tools
     /// through its window. Nothing here touches the editor model beyond reading the open game's resolution, so every
     /// tool runs off the UI thread.
     /// </summary>
-    internal static class DesktopTools
+    internal static partial class DesktopTools
     {
         internal const string RendererSoftware = "software";
         private const int WindowWaitMs = 15000;
@@ -41,6 +41,9 @@ namespace AgsMcp.Editor.Tools
             yield return DesktopStatus(ctx, session);
             yield return DesktopStop(ctx);
             yield return DesktopScreenshot(ctx, session);
+            yield return DesktopClick(ctx, session);
+            yield return DesktopKey(ctx);
+            yield return DesktopType(ctx);
         }
 
         private static Tool DesktopRun(ToolContext ctx, Session session) => new Tool
@@ -352,7 +355,7 @@ namespace AgsMcp.Editor.Tools
             }
         }
 
-        private static class NativeMethods
+        private static partial class NativeMethods
         {
             public const int SW_RESTORE = 9;
             public const int SW_SHOWNOACTIVATE = 4;

@@ -270,14 +270,14 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | `game_key(key)` | Simulate a key press (letter/digit/`Space`/`Enter`/`F5`/arrows… or a raw code). Navigation and function keys are posted to the game window as real keys. |
 | `game_type(text)` | Type text as character input for GUI text boxes and `on_text_input`. |
 | `game_hover_name(x, y)` | The name of whatever is at a screen point. |
-| `game_wait_until(condition, [room], [pattern], [sinceLine], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or until a game log line matches the regex `pattern` (`logLine`, from `sinceLine`), or time out. |
+| `game_wait_until(condition, [room], [pattern], [sinceLine], [source], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or until a game log line matches the regex `pattern` (`logLine`, from `sinceLine`, in the `source` game's log), or time out. |
 | `game_get_global_int(index)` / `game_set_global_int(index, value)` | Read/write a legacy GlobalInt. |
 | `game_call_function(name, [args], [roomScript])` | Queue a function defined in GlobalScript.asc, or with `roomScript=true` in the current room's `roomN.asc` (0–2 integer args; refused if that script does not define it). Keep it non-blocking. |
 | `game_text_extent(font, text)` | Width and height of one line as the running game draws it (engine `GetTextExtent`; TTF fonts too). |
 | `game_run_interaction(target, mode, [inventory])` | Click a hotspot, object or character of the current room (`hotspot:N`, `object:oName`, `character:cName`…) in a cursor mode: the point comes from the mask or sprite, is confirmed with the hover name, then a click is queued. Refuses rather than mis-clicking. |
 
 ### Desktop driver (any build, no plugin)
-Test the game a player gets: a release build (`build_game mode=release`) with no engine plugin, observed through its window. The software renderer is the default because Direct3D and OpenGL windows read back black.
+Test the game a player gets: a release build (`build_game mode=release`) with no engine plugin, observed through its window and driven by real mouse and keyboard input. The software renderer is the default because Direct3D and OpenGL windows read back black.
 
 | Tool | Description |
 |------|-------------|
@@ -285,8 +285,11 @@ Test the game a player gets: a release build (`build_game mode=release`) with no
 | `desktop_status` | Running, pid, log, and the window's client area with the game's scale and offset in it. |
 | `desktop_stop` | Stop it. |
 | `desktop_screenshot([outPath], [frames], [intervalMs])` | Capture the window at the game's native size as a PNG; `frames > 1` writes a timed burst (`frame-NNN.png` + `frames.json`) into the `outPath` directory. |
+| `desktop_click(x, y, [button])` | Bring the window to the front and click a point in game coordinates with the real mouse (`left`/`right`/`middle`). Refuses when the window cannot be brought forward or another window covers the point. |
+| `desktop_key(key, [holdMs])` | Press a key with the real keyboard: a name, letter, digit, `F1`..`F24` or `0xNN`, with optional `Ctrl+`/`Shift+`/`Alt+`. Navigation keys go as extended keys, so NumLock does not turn them into digits. |
+| `desktop_type(text)` | Type text as Unicode keyboard input, which reaches text boxes and `on_text_input`. |
 
-`get_game_log(source=desktop)` reads this game's log; without `source` it reads whichever game was launched last.
+`get_game_log(source=desktop)` reads this game's log, and `game_wait_until(condition=logLine, source=desktop)` waits on it; without `source` both use whichever game was launched last.
 
 ## Testing
 

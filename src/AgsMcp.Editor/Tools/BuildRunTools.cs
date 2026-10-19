@@ -300,11 +300,7 @@ namespace AgsMcp.Editor.Tools
             Handler = args =>
             {
                 string source = args.String("source", null);
-                if (source == null)
-                    source = (ctx.DesktopRunner.StartedUtc ?? DateTime.MinValue) > (runner.StartedUtc ?? DateTime.MinValue) ? SourceDesktop : SourceEngine;
-                if (source != SourceEngine && source != SourceDesktop)
-                    throw new ToolException("'source' must be 'engine' or 'desktop'.");
-                string logPath = (source == SourceDesktop ? ctx.DesktopRunner : runner).LogPath;
+                string logPath = LogRunner(ctx.DesktopRunner, runner, ref source).LogPath;
                 if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath))
                     throw new ToolException(source == SourceDesktop
                         ? "No desktop game log yet. Launch a game with desktop_run first."
@@ -334,6 +330,19 @@ namespace AgsMcp.Editor.Tools
         /// (--log-file-path is a directory, not a file). --log-file-path uses '=', --user-data-dir is a
         /// following argument (space), per the engine's OPTIONS.md.
         /// </summary>
+        /// <summary>
+        /// The runner whose log a 'source' argument names: 'engine' (run_game) or 'desktop' (desktop_run); null picks the
+        /// one launched last and sets 'source' to it.
+        /// </summary>
+        internal static GameRunner LogRunner(GameRunner desktop, GameRunner engine, ref string source)
+        {
+            if (source == null)
+                source = (desktop.StartedUtc ?? DateTime.MinValue) > (engine.StartedUtc ?? DateTime.MinValue) ? SourceDesktop : SourceEngine;
+            if (source != SourceEngine && source != SourceDesktop)
+                throw new ToolException("'source' must be 'engine' or 'desktop'.");
+            return source == SourceDesktop ? desktop : engine;
+        }
+
         internal static string BuildEngineArgs(string logDir, string userDataDir, int? startRoom)
         {
             var sb = new StringBuilder();

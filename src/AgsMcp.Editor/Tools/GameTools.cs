@@ -349,13 +349,15 @@ namespace AgsMcp.Editor.Tools
                           "met while one waits for a click; an open dialog option list keeps it disabled until an option is " +
                           "clicked. 'logLine' waits for a game log line matching the regular expression 'pattern' at or after " +
                           "'sinceLine' (default: lines written after the call starts, so take get_game_log's nextLine before " +
-                          "the action and pass it); it returns the line and its index. Many MCP clients give up on a call after " +
+                          "the action and pass it); it returns the line and its index. It reads the log file, so it also waits on " +
+                          "a desktop_run game ('source', default: the game launched last, as get_game_log). Many MCP clients give up on a call after " +
                           "about 60 s, so keep timeoutMs at 45000 or less and chain waits.",
             InputSchema = Schema.Object()
                 .Required("condition", Schema.String("What to wait for.", GameWait.ConditionRoom, GameWait.ConditionInterfaceEnabled, GameWait.ConditionIdle, GameWait.ConditionReady, GameWait.ConditionLogLine))
                 .Optional("room", Schema.Integer("Target room number (required for condition 'room')."))
                 .Optional("pattern", Schema.String("Regular expression a log line must match (required for condition 'logLine')."))
                 .Optional("sinceLine", Schema.Integer("For 'logLine': the 0-based log line to search from (get_game_log's nextLine). Default: the end of the log when the wait starts."))
+                .Optional("source", Schema.String("For 'logLine': 'engine' (run_game) or 'desktop' (desktop_run). Default: the last launched.", BuildRunTools.SourceEngine, BuildRunTools.SourceDesktop))
                 .Optional("timeoutMs", Schema.Integer("Maximum time to wait in milliseconds (default 5000)."))
                 .Optional("stableMs", Schema.Integer("How long the condition must hold without interruption (default 400; 0 = first match). Not used by 'logLine'."))
                 .Build(),
@@ -400,9 +402,13 @@ namespace AgsMcp.Editor.Tools
             if (string.IsNullOrEmpty(pattern)) throw new ToolException("condition 'logLine' needs a 'pattern' (a regular expression).");
             try { GameWait.FindLogLine(new string[0], pattern, 0); }
             catch (ArgumentException e) { throw new ToolException("'pattern' is not a valid regular expression: " + e.Message); }
-            string logPath = ctx.Runner.LogPath;
+            string source = args.String("source", null);
+            GameRunner runner = BuildRunTools.LogRunner(ctx.DesktopRunner, ctx.Runner, ref source);
+            string logPath = runner.LogPath;
             if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath))
-                throw new ToolException("No game log yet. Launch the game with run_game first.");
+                throw new ToolException(source == BuildRunTools.SourceDesktop
+                    ? "No desktop game log yet. Launch a game with desktop_run first."
+                    : "No game log yet. Launch the game with run_game first.");
             int timeoutMs = args.Int("timeoutMs", 5000);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -416,7 +422,7 @@ namespace AgsMcp.Editor.Tools
                 if (index >= 0 || sw.ElapsedMilliseconds >= timeoutMs) break;
                 // A game that has exited writes nothing more; read the log once more, then stop.
                 if (exited) break;
-                exited = !ctx.Runner.IsRunning;
+                exited = !runner.IsRunning;
                 Thread.Sleep(100);
                 lines = BuildRunTools.SliceLog(BuildRunTools.ReadShared(logPath), 0, int.MaxValue).Lines;
             }
@@ -424,12 +430,13 @@ namespace AgsMcp.Editor.Tools
             {
                 met = index >= 0,
                 condition = GameWait.ConditionLogLine,
+                source,
                 pattern,
                 sinceLine = since,
                 lineIndex = index >= 0 ? (int?)index : null,
                 line = index >= 0 ? lines[index] : null,
                 nextLine = index >= 0 ? index + 1 : lines.Count,
-                gameRunning = ctx.Runner.IsRunning,
+                gameRunning = runner.IsRunning,
                 elapsedMs = sw.ElapsedMilliseconds,
             });
         }

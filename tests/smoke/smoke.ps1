@@ -659,6 +659,43 @@ try {
         $d.source -eq "desktop" -and $def.source -eq "desktop" -and $d.logPath -match "ags-mcp-desktop" -and $d.totalLines -gt 0 -and
             -not ($d.lines -match "MCP engine bridge")
     }
+    # Real input: room 2's hSmoke hotspot covers game pixels 100..139 x 50..89; the template starts in Walk mode and a
+    # right-click selects the next mode (Look).
+    Check "desktop_run startRoom=2, desktop_click right then left on hSmoke runs its Look event" {
+        $r = Get-Json (Invoke-Mcp "desktop_run" @{ startRoom = 2 } 90)
+        Start-Sleep -Seconds 3
+        $since = (Get-GameLogSince 0).nextLine
+        $right = Get-Json (Invoke-Mcp "desktop_click" @{ x = 105; y = 55; button = "right" })
+        Start-Sleep -Milliseconds 300
+        $left = Get-Json (Invoke-Mcp "desktop_click" @{ x = 105; y = 55 })
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "MCPLOOK"; sinceLine = $since; timeoutMs = 5000 })
+        # The Look event says a line; a right-click skips it (and only changes the mode if the line already ended).
+        Invoke-Mcp "desktop_click" @{ x = 105; y = 55; button = "right" } | Out-Null
+        Write-Host ("    clicked screen {0},{1} (took focus: {2}); MCPLOOK after {3} ms" -f $left.screen.x, $left.screen.y, $right.tookFocus, $w.elapsedMs) -ForegroundColor DarkGray
+        $r.launched -and $right.clicked -and $left.clicked -and $w.met -eq $true
+    }
+    Check "desktop_type sends text that reaches on_text_input" {
+        Start-Sleep -Milliseconds 500
+        $since = (Get-GameLogSince 0).nextLine
+        $t = Get-Json (Invoke-Mcp "desktop_type" @{ text = "Hi" })
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "MCPTXT 105"; sinceLine = $since; timeoutMs = 5000 })
+        $t.units -eq 2 -and $w.met -eq $true -and ((Get-GameLogSince $since).lines -match "MCPTXT 72")
+    }
+    Check "desktop_key Escape, then Up reaches on_key_press as 372 (an extended key, not keypad 8)" {
+        $since = (Get-GameLogSince 0).nextLine
+        $esc = Get-Json (Invoke-Mcp "desktop_key" @{ key = "Escape" })
+        $up = Get-Json (Invoke-Mcp "desktop_key" @{ key = "Up" })
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "MCPKEY 372"; sinceLine = $since; timeoutMs = 5000 })
+        Start-Sleep -Milliseconds 300
+        $lines = (Get-GameLogSince $since).lines
+        Write-Host ("    {0}" -f (($lines -match "MCPKEY") -join " | ")) -ForegroundColor DarkGray
+        $esc.pressed -and $up.extended -eq $true -and $w.met -eq $true -and ($lines -match "MCPKEY 27") -and -not ($lines -match "MCPKEY 56")
+    }
+    Check "desktop_key refuses an unknown key and desktop_click a point outside the game" {
+        $k = try { Invoke-Mcp "desktop_key" @{ key = "Banana" } | Out-Null; $false } catch { $_.Exception.Message -match "Unknown key" }
+        $c = try { Invoke-Mcp "desktop_click" @{ x = 9999; y = 0 } | Out-Null; $false } catch { $_.Exception.Message -match "outside" }
+        $k -and $c
+    }
     Check "desktop_stop stops it" {
         $s = Get-Json (Invoke-Mcp "desktop_stop")
         $s.stopped -eq $true -and (Get-Json (Invoke-Mcp "desktop_status")).running -eq $false
