@@ -99,7 +99,7 @@ function Remove-SmokeGame {
     if (Test-Path $Folder) { Write-Host "Could not delete $Folder (files still in use); delete it by hand." -ForegroundColor Yellow }
 }
 
-Write-Host "AGS MCP smoke test against $Endpoint" -ForegroundColor Cyan
+Write-Host "Pravus AGS MCP smoke test against $Endpoint" -ForegroundColor Cyan
 Write-Host "Smoke game: $Folder" -ForegroundColor DarkGray
 
 try {

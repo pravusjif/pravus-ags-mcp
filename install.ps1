@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Installs (or removes) the AGS MCP plugins in an Adventure Game Studio 3.6 editor folder.
+  Installs (or removes) the Pravus AGS MCP plugins in an Adventure Game Studio 3.6 editor folder.
 
 .DESCRIPTION
   Copies AGS.Plugin.Mcp.dll (the editor plugin that hosts the MCP server) and agsmcp.dll (the
@@ -127,7 +127,7 @@ function Write-NextSteps {
     Write-Host "Next steps" -ForegroundColor Cyan
     Write-Host "  1. Start the AGS editor and open your game. An MCP menu appears and the server listens on $e."
     Write-Host "     Check it from PowerShell: (Invoke-WebRequest $($e -replace 'mcp$', '') -UseBasicParsing).Content"
-    Write-Host "     prints 'AGS MCP server <N> tools' and the open game."
+    Write-Host "     prints 'Pravus AGS MCP server <N> tools' and the open game."
     Write-Host "  2. Connect your MCP client (MCP > Client setup in the editor shows the same):"
     Write-Host "       Any Streamable HTTP client:  $e"
     Write-Host "       Claude Code:                 claude mcp add --transport http ags $e"
@@ -150,7 +150,7 @@ function Invoke-AgsMcpInstall {
         }
         $skill = Join-Path $SkillDir "ags-mcp"
         if (Test-Path $skill) { Write-Host "The skill at $skill was left in place; delete it by hand if you no longer want it." }
-        Write-Host "AGS MCP uninstalled." -ForegroundColor Green
+        Write-Host "Pravus AGS MCP uninstalled." -ForegroundColor Green
         return
     }
 
@@ -177,7 +177,7 @@ function Invoke-AgsMcpInstall {
             Write-Host "Installed $target"
         }
         $ver = (Get-Item (Join-Path $dir $script:AgsMcpFiles[0])).VersionInfo.FileVersion
-        Write-Host "AGS MCP $ver installed into $dir" -ForegroundColor Green
+        Write-Host "Pravus AGS MCP $ver installed into $dir" -ForegroundColor Green
 
         if ($InstallSkill) {
             $skillSrc = Join-Path $release "skills\ags-mcp"

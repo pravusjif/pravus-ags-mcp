@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds the AGS MCP plugins and optionally deploys them into an AGS editor folder.
+  Builds the Pravus AGS MCP plugins and optionally deploys them into an AGS editor folder.
 
 .EXAMPLE
   .\build.ps1                         # build (Release)

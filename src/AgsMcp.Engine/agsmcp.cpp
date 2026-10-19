@@ -724,7 +724,7 @@ static void push_event(const std::string& e) {
 // ------------------------------------------------------------- plugin exports
 
 DLLEXPORT const char* AGS_GetPluginName() {
-    return "AGS MCP Engine Bridge";
+    return "Pravus AGS MCP Engine Bridge";
 }
 
 DLLEXPORT int AGS_EditorStartup(IAGSEditor* editor) {

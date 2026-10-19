@@ -8,7 +8,7 @@ namespace AgsMcp.Editor.Ui
     {
         public ClientSetupDialog(string url)
         {
-            Text = "AGS MCP - client setup";
+            Text = "Pravus AGS MCP - client setup";
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(760, 400);
             MinimizeBox = false;

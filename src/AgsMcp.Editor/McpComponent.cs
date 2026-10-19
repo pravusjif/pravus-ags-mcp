@@ -42,7 +42,7 @@ namespace AgsMcp.Editor
             _dispatcher = new UiDispatcher(() => EditorInternals.MainForm);
 
             string version = typeof(McpComponent).Assembly.GetName().Version.ToString(3);
-            _mcp = new McpServer("ags-mcp", version, Instructions, _dispatcher) { Log = Logger.Write };
+            _mcp = new McpServer("pravus-ags-mcp", version, Instructions, _dispatcher) { Log = Logger.Write };
             var context = new ToolContext(editor);
             _mcp.AddTools(ProjectTools.Create(context));
             _mcp.AddTools(ScriptTools.Create(context));
@@ -136,7 +136,7 @@ namespace AgsMcp.Editor
                 if (_editor.CurrentGame != null) game = _editor.CurrentGame.Settings.GameName + " - " + _editor.CurrentGame.DirectoryPath;
             }
             catch (Exception) { }
-            return $"AGS MCP server {_mcp.Tools.Count} tools\nEndpoint: {Url}\nAGS editor: {_editor.Version}\nGame: {game}\n";
+            return $"Pravus AGS MCP server {_mcp.Tools.Count} tools\nEndpoint: {Url}\nAGS editor: {_editor.Version}\nGame: {game}\n";
         }
 
         private void SetStatus()
@@ -186,7 +186,7 @@ namespace AgsMcp.Editor
 
         private void ChangePort()
         {
-            string input = Microsoft.VisualBasic.Interaction.InputBox("TCP port for the MCP server (127.0.0.1 only):", "AGS MCP", _settings.Port.ToString());
+            string input = Microsoft.VisualBasic.Interaction.InputBox("TCP port for the MCP server (127.0.0.1 only):", "Pravus AGS MCP", _settings.Port.ToString());
             if (string.IsNullOrWhiteSpace(input)) return;
             if (!int.TryParse(input, out int port) || port < 1024 || port > 65535)
             {

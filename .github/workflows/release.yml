@@ -67,4 +67,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $zip = (Get-ChildItem dist\*.zip | Select-Object -First 1).FullName
-          gh release create $env:GITHUB_REF_NAME $zip --title "AGS MCP $env:GITHUB_REF_NAME" --generate-notes
+          gh release create $env:GITHUB_REF_NAME $zip --title "Pravus AGS MCP $env:GITHUB_REF_NAME" --generate-notes

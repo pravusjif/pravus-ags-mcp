@@ -14,7 +14,7 @@ namespace AgsMcp.Editor
 
         public McpPlugin(IAGSEditor editor)
         {
-            Logger.Write("Loading AGS MCP plugin " + typeof(McpPlugin).Assembly.GetName().Version + " into AGS " + editor.Version);
+            Logger.Write("Loading Pravus AGS MCP plugin " + typeof(McpPlugin).Assembly.GetName().Version + " into AGS " + editor.Version);
             try
             {
                 _component = new McpComponent(editor);

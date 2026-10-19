@@ -1,4 +1,4 @@
-# AGS MCP Server: architecture
+# Pravus AGS MCP Server: architecture
 
 This document describes how the server is built, why it is built that way, and the verified facts about AGS internals it relies on.
 The tool reference is in [README.md](../README.md#tools). When you change behaviour or verify a new AGS fact, update this file.

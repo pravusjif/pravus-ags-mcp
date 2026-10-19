@@ -1,4 +1,4 @@
-# AGS MCP Server
+# Pravus AGS MCP Server
 
 An MCP server that runs inside the Adventure Game Studio 3.6 editor as a plugin, plus a native engine plugin for driving the running game.
 
