@@ -360,7 +360,7 @@ namespace AgsMcp.Editor.Tools
             return slice;
         }
 
-        private static string ReadShared(string path)
+        internal static string ReadShared(string path)
         {
             using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var sr = new StreamReader(fs))

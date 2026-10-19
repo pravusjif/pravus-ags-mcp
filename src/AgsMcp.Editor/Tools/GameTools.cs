@@ -124,13 +124,27 @@ namespace AgsMcp.Editor.Tools
         {
             Name = "game_screenshot",
             Title = "Game screenshot",
-            Description = "Capture a screenshot of the running game and return it as a PNG image, or write it to outPath.",
-            InputSchema = Schema.Object().Optional(ImageOutput.Arg, ImageOutput.Prop()).Build(),
+            Description = "Capture a screenshot of the running game and return it as a PNG image, or write it to outPath. " +
+                          "frames > 1 captures a burst, one frame every 'everyN' game frames, for animations and transitions: " +
+                          "outPath is then a directory that receives frame-000.png, frame-001.png, ... and frames.json (each " +
+                          "frame's file, size and 'ms' since the first), and the result lists them instead of returning images. " +
+                          "frames x everyN is limited to " + MaxBurstGameFrames + " game frames. A screenshot shows the last " +
+                          "rendered frame, so take it after game_wait_until rather than right after a click.",
+            InputSchema = Schema.Object()
+                .Optional(ImageOutput.Arg, Schema.String("Absolute path of the PNG to write (one frame), or of the directory for a burst (required when frames > 1)."))
+                .Optional("frames", Schema.Integer("Frames to capture (default 1). More than 1 is a burst."))
+                .Optional("everyN", Schema.Integer("Burst only: capture every Nth game frame (default 1)."))
+                .Build(),
             Annotations = ToolAnnotations.ReadOnlyTool,
             RunOnUiThread = false,
+            Timeout = TimeSpan.FromSeconds(240),
             Handler = args =>
             {
                 RequireRunning(ctx);
+                int frames = args.Int("frames", 1), everyN = args.Int("everyN", 1);
+                if (frames < 1) throw new ToolException("'frames' must be 1 or more.");
+                if (everyN < 1) throw new ToolException("'everyN' must be 1 or more.");
+                if (frames > 1) return ScreenshotBurst(client, args, frames, everyN);
                 JObject resp = Ok(client.Send("screenshot", null));
                 string path = (string)resp["path"];
                 if (string.IsNullOrEmpty(path) || !File.Exists(path))
@@ -157,6 +171,58 @@ namespace AgsMcp.Editor.Tools
                 return ImageOutput.Result(args, png, width, height, "Screenshot of the running game.");
             },
         };
+
+        internal const int MaxBurstGameFrames = 2000;
+
+        /// <summary>
+        /// A burst: the engine holds the request across frames and answers with every frame's BMP and its time; each
+        /// becomes frame-NNN.png in the outPath directory, with frames.json beside them. The BMPs are always deleted.
+        /// </summary>
+        private static ToolResult ScreenshotBurst(EngineClient client, ToolArgs args, int frames, int everyN)
+        {
+            if ((long)frames * everyN > MaxBurstGameFrames)
+                throw new ToolException($"frames x everyN is {(long)frames * everyN}; keep it at {MaxBurstGameFrames} game frames or less.");
+            string dir = args.String(ImageOutput.Arg, null);
+            if (string.IsNullOrEmpty(dir))
+                throw new ToolException("A burst (frames > 1) writes files: pass 'outPath', an absolute directory.");
+            if (!ImageOutput.IsAbsolutePath(dir))
+                throw new ToolException($"'outPath' must be an absolute path (a drive or UNC path), not '{dir}'.");
+            if (File.Exists(dir)) throw new ToolException($"'{dir}' is a file; a burst needs a directory.");
+            Directory.CreateDirectory(dir);
+
+            // The engine waits up to 100 ms per game frame plus 5 s; give the connection 5 s more.
+            int timeoutMs = frames * everyN * 100 + 10000;
+            JObject resp = client.Send("screenshot", new JObject { ["frames"] = frames, ["everyN"] = everyN }, timeoutMs);
+            var shots = (resp?["frames"] as JArray)?.OfType<JObject>().ToList() ?? new List<JObject>();
+            var written = new List<object>();
+            try
+            {
+                Ok(resp);
+                foreach (JObject shot in shots)
+                {
+                    int index = (int)shot["index"];
+                    string file = $"frame-{index:D3}.png";
+                    using (var bmp = new Bitmap((string)shot["path"]))
+                    {
+                        bmp.Save(Path.Combine(dir, file), ImageFormat.Png);
+                        written.Add(new { index, file, ms = (int)shot["ms"], width = bmp.Width, height = bmp.Height });
+                    }
+                }
+            }
+            finally
+            {
+                foreach (JObject shot in shots)
+                {
+                    string bmpPath = (string)shot["path"];
+                    try { if (!string.IsNullOrEmpty(bmpPath)) File.Delete(bmpPath); }
+                    catch (Exception e) { Logger.Write("Could not delete " + bmpPath + ": " + e.Message); }
+                }
+            }
+            var summary = new { everyN, elapsedMs = (int?)resp["elapsedMs"], frames = written };
+            string json = Path.Combine(dir, "frames.json");
+            File.WriteAllText(json, Newtonsoft.Json.JsonConvert.SerializeObject(summary, Newtonsoft.Json.Formatting.Indented));
+            return ToolResult.Json(new { directory = dir, count = written.Count, everyN, elapsedMs = summary.elapsedMs, json, frames = written });
+        }
 
         private static Tool GameClick(ToolContext ctx, EngineClient client) => new Tool
         {
@@ -281,21 +347,26 @@ namespace AgsMcp.Editor.Tools
                           "the interface is briefly enabled between consecutive speech lines and dialog steps. Returns whether " +
                           "the condition was met and the final state. A Display() box leaves the interface enabled, so 'ready' can be " +
                           "met while one waits for a click; an open dialog option list keeps it disabled until an option is " +
-                          "clicked. Many MCP clients give up on a call after about 60 s, so keep timeoutMs at 45000 or less and " +
-                          "chain waits.",
+                          "clicked. 'logLine' waits for a game log line matching the regular expression 'pattern' at or after " +
+                          "'sinceLine' (default: lines written after the call starts, so take get_game_log's nextLine before " +
+                          "the action and pass it); it returns the line and its index. Many MCP clients give up on a call after " +
+                          "about 60 s, so keep timeoutMs at 45000 or less and chain waits.",
             InputSchema = Schema.Object()
-                .Required("condition", Schema.String("What to wait for.", GameWait.ConditionRoom, GameWait.ConditionInterfaceEnabled, GameWait.ConditionIdle, GameWait.ConditionReady))
+                .Required("condition", Schema.String("What to wait for.", GameWait.ConditionRoom, GameWait.ConditionInterfaceEnabled, GameWait.ConditionIdle, GameWait.ConditionReady, GameWait.ConditionLogLine))
                 .Optional("room", Schema.Integer("Target room number (required for condition 'room')."))
+                .Optional("pattern", Schema.String("Regular expression a log line must match (required for condition 'logLine')."))
+                .Optional("sinceLine", Schema.Integer("For 'logLine': the 0-based log line to search from (get_game_log's nextLine). Default: the end of the log when the wait starts."))
                 .Optional("timeoutMs", Schema.Integer("Maximum time to wait in milliseconds (default 5000)."))
-                .Optional("stableMs", Schema.Integer("How long the condition must hold without interruption (default 400; 0 = first match)."))
+                .Optional("stableMs", Schema.Integer("How long the condition must hold without interruption (default 400; 0 = first match). Not used by 'logLine'."))
                 .Build(),
             Annotations = ToolAnnotations.ReadOnlyTool,
             RunOnUiThread = false,
             Timeout = TimeSpan.FromSeconds(60),
             Handler = args =>
             {
-                RequireRunning(ctx);
                 string condition = args.String("condition");
+                if (condition == GameWait.ConditionLogLine) return WaitForLogLine(ctx, args);
+                RequireRunning(ctx);
                 int? room = args.Has("room") ? (int?)args.Int("room") : null;
                 int timeoutMs = args.Int("timeoutMs", 5000);
                 int stableMs = Math.Max(0, args.Int("stableMs", 400));
@@ -321,6 +392,47 @@ namespace AgsMcp.Editor.Tools
                 return ToolResult.Json(new { met, condition, room, elapsedMs = sw.ElapsedMilliseconds, state });
             },
         };
+
+        /// <summary>game_wait_until condition=logLine: polls the game log file, not the engine, so it works while the game blocks.</summary>
+        private static ToolResult WaitForLogLine(ToolContext ctx, ToolArgs args)
+        {
+            string pattern = args.String("pattern", null);
+            if (string.IsNullOrEmpty(pattern)) throw new ToolException("condition 'logLine' needs a 'pattern' (a regular expression).");
+            try { GameWait.FindLogLine(new string[0], pattern, 0); }
+            catch (ArgumentException e) { throw new ToolException("'pattern' is not a valid regular expression: " + e.Message); }
+            string logPath = ctx.Runner.LogPath;
+            if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath))
+                throw new ToolException("No game log yet. Launch the game with run_game first.");
+            int timeoutMs = args.Int("timeoutMs", 5000);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            List<string> lines = BuildRunTools.SliceLog(BuildRunTools.ReadShared(logPath), 0, int.MaxValue).Lines;
+            int since = args.Has("sinceLine") ? Math.Max(0, args.Int("sinceLine")) : lines.Count;
+            int index = -1;
+            bool exited = false;
+            while (true)
+            {
+                index = GameWait.FindLogLine(lines, pattern, since);
+                if (index >= 0 || sw.ElapsedMilliseconds >= timeoutMs) break;
+                // A game that has exited writes nothing more; read the log once more, then stop.
+                if (exited) break;
+                exited = !ctx.Runner.IsRunning;
+                Thread.Sleep(100);
+                lines = BuildRunTools.SliceLog(BuildRunTools.ReadShared(logPath), 0, int.MaxValue).Lines;
+            }
+            return ToolResult.Json(new
+            {
+                met = index >= 0,
+                condition = GameWait.ConditionLogLine,
+                pattern,
+                sinceLine = since,
+                lineIndex = index >= 0 ? (int?)index : null,
+                line = index >= 0 ? lines[index] : null,
+                nextLine = index >= 0 ? index + 1 : lines.Count,
+                gameRunning = ctx.Runner.IsRunning,
+                elapsedMs = sw.ElapsedMilliseconds,
+            });
+        }
 
         private static Tool GameGetGlobalInt(ToolContext ctx, EngineClient client) => new Tool
         {

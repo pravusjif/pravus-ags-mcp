@@ -520,6 +520,20 @@ try {
         $j = Get-Json (Invoke-Mcp "game_screenshot" @{ outPath = $shot })
         (Get-Item $shot).Length -gt 0 -and $j.width -gt 0
     }
+    Check "game_screenshot burst of 5 frames every 2 writes 5 PNGs and frames.json" {
+        $dir = Join-Path $Folder "out\burst"
+        $b = Get-Json (Invoke-Mcp "game_screenshot" @{ outPath = $dir; frames = 5; everyN = 2 } 120)
+        $pngs = @(Get-ChildItem $dir -Filter "frame-*.png")
+        $meta = Get-Content (Join-Path $dir "frames.json") -Raw | ConvertFrom-Json
+        $ms = @($meta.frames | ForEach-Object { $_.ms })
+        $ordered = ($ms -join ",") -eq (($ms | Sort-Object) -join ",")
+        Write-Host ("    {0} frames over {1} ms: {2}" -f $b.count, $b.elapsedMs, ($ms -join ",")) -ForegroundColor DarkGray
+        $b.count -eq 5 -and $pngs.Count -eq 5 -and @($meta.frames).Count -eq 5 -and $ordered -and $ms[4] -gt 0 -and
+            @(Get-ChildItem (Join-Path $env:TEMP "ags-mcp-run") -Recurse -Filter "agsmcp*.bmp" -ErrorAction SilentlyContinue).Count -eq 0
+    }
+    Check "game_screenshot refuses a burst without outPath" {
+        try { Invoke-Mcp "game_screenshot" @{ frames = 3 } | Out-Null; $false } catch { $_.Exception.Message -match "outPath" }
+    }
     Check "game_key Up and F7 reach on_key_press as 372 and 365 (window-routed)" {
         $since = (Get-GameLogSince 0).nextLine
         $up = Get-Json (Invoke-Mcp "game_key" @{ key = "Up" })
@@ -528,6 +542,17 @@ try {
         $lines = (Get-GameLogSince $since).lines
         $up.via -eq "window" -and $f7.via -eq "window" -and
             ($lines -match "MCPKEY 372") -and ($lines -match "MCPKEY 365") -and -not ($lines -match "MCPKEY 56")
+    }
+    Check "game_wait_until logLine finds the MCPKEY line a game_key writes" {
+        $since = (Get-GameLogSince 0).nextLine
+        Invoke-Mcp "game_key" @{ key = "B" } | Out-Null
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "MCPKEY 66"; sinceLine = $since; timeoutMs = 5000 })
+        Write-Host ("    line {0} after {1} ms: {2}" -f $w.lineIndex, $w.elapsedMs, $w.line) -ForegroundColor DarkGray
+        $w.met -eq $true -and $w.line -match "MCPKEY 66" -and $w.lineIndex -ge $since -and $w.nextLine -eq $w.lineIndex + 1
+    }
+    Check "game_wait_until logLine times out on a line that never comes" {
+        $w = Get-Json (Invoke-Mcp "game_wait_until" @{ condition = "logLine"; pattern = "NEVER_WRITTEN_\d+"; timeoutMs = 600 })
+        $w.met -eq $false -and $w.elapsedMs -ge 600 -and $w.lineIndex -eq $null
     }
     Check "game_type sends text input that reaches on_text_input" {
         $since = (Get-GameLogSince 0).nextLine

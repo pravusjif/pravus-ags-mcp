@@ -11,6 +11,7 @@
 //=============================================================================
 #define _CRT_SECURE_NO_WARNINGS
 #define THIS_IS_THE_PLUGIN
+#define NOMINMAX
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -19,6 +20,7 @@
 #include "agsplugin.h"
 #include "json_min.h"
 
+#include <algorithm>
 #include <string>
 #include <deque>
 #include <vector>
@@ -248,6 +250,17 @@ static std::vector<wchar_t> utf8_to_utf16(const std::string& s) {
     return out;
 }
 
+// Save one screenshot as $SAVEGAMEDIR$/<name>.bmp. Returns SaveScreenShot's result; 'path' gets the resolved file.
+static int save_shot(const std::string& name, std::string& path) {
+    std::string scriptPath = "$SAVEGAMEDIR$/" + name + ".bmp";
+    int res = fn_savescreenshot(scriptPath.c_str());
+    char buf[1024];
+    buf[0] = 0;
+    engine->ResolveFilePath(scriptPath.c_str(), buf, sizeof(buf));
+    path = buf;
+    return res;
+}
+
 static jm::Value cmd_screenshot() {
     jm::Value r = jm::Value::MkObj();
     if (!fn_savescreenshot) {
@@ -256,17 +269,78 @@ static jm::Value cmd_screenshot() {
         return r;
     }
     // A fresh name per shot: a failed save can never hand back the previous picture. The editor side deletes it.
-    std::string scriptPath = "$SAVEGAMEDIR$/agsmcp-" + std::to_string((long long)++g_shot_counter) + ".bmp";
-    int res = fn_savescreenshot(scriptPath.c_str());
-    char buf[1024];
-    buf[0] = 0;
-    engine->ResolveFilePath(scriptPath.c_str(), buf, sizeof(buf));
-    std::string path(buf);
+    std::string path;
+    int res = save_shot("agsmcp-" + std::to_string((long long)++g_shot_counter), path);
     r.set("ok", res != 0 && !path.empty());
     if (res == 0) r.set("error", "SaveScreenShot failed");
     r.set("result", res);
     r.set("path", path);
     return r;
+}
+
+// ---- screenshot bursts (main thread only) -----------------------------------
+// A burst request is not answered by drain_queue: it stays here while PRERENDER captures one frame every 'everyN'
+// frames, and is completed when the last frame is saved (or when the game quits). One burst at a time.
+struct Burst {
+    std::shared_ptr<Request> req;
+    int frames = 0, everyN = 1, taken = 0, tick = 0;
+    long long id = 0;
+    std::chrono::steady_clock::time_point start;
+    jm::Value shots;
+};
+static Burst g_burst;
+static const int kMaxBurstFrames = 1000;
+
+static void complete_request(const std::shared_ptr<Request>& req, const jm::Value& result);
+
+static void finish_burst(bool ok, const std::string& error) {
+    jm::Value r = jm::Value::MkObj();
+    r.set("ok", ok);
+    if (!ok) r.set("error", error);
+    r.set("everyN", g_burst.everyN);
+    r.set("elapsedMs", (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - g_burst.start).count());
+    r.set("frames", g_burst.shots); // on failure too, so the editor can delete what was written
+    std::shared_ptr<Request> req = g_burst.req;
+    g_burst = Burst();
+    complete_request(req, r);
+}
+
+static void capture_burst_frame() {
+    std::string path;
+    int i = g_burst.taken;
+    int res = save_shot("agsmcp-" + std::to_string(g_burst.id) + "-" + std::to_string((long long)i), path);
+    if (res == 0 || path.empty()) { finish_burst(false, "SaveScreenShot failed at frame " + std::to_string((long long)i)); return; }
+    jm::Value s = jm::Value::MkObj();
+    s.set("index", i);
+    s.set("path", path);
+    s.set("ms", (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - g_burst.start).count());
+    g_burst.shots.arr.push_back(s);
+    if (++g_burst.taken >= g_burst.frames) finish_burst(true, "");
+}
+
+// Start a burst for 'req' and capture its first frame now.
+static void start_burst(const std::shared_ptr<Request>& req) {
+    jm::Value err = jm::Value::MkObj();
+    err.set("ok", false);
+    if (!fn_savescreenshot) { err.set("error", "SaveScreenShot is not available"); complete_request(req, err); return; }
+    if (g_burst.req) { err.set("error", "a screenshot burst is already running"); complete_request(req, err); return; }
+    g_burst.req = req;
+    g_burst.frames = std::min(argi(req->args, "frames", 1), kMaxBurstFrames);
+    g_burst.everyN = std::max(1, argi(req->args, "everyN", 1));
+    g_burst.id = ++g_shot_counter;
+    g_burst.start = std::chrono::steady_clock::now();
+    g_burst.shots = jm::Value::MkArr();
+    capture_burst_frame();
+}
+
+// Called once per PRERENDER before the queue is drained, so a burst started this frame is not ticked twice.
+static void tick_burst() {
+    if (!g_burst.req) return;
+    if (++g_burst.tick % g_burst.everyN == 0) capture_burst_frame();
+}
+
+static bool is_burst(const std::string& cmd, const jm::Value& args) {
+    return cmd == "screenshot" && argi(args, "frames", 1) > 1;
 }
 
 static jm::Value handle_command(const std::string& cmd, const jm::Value& args) {
@@ -454,6 +528,7 @@ static void complete_request(const std::shared_ptr<Request>& req, const jm::Valu
 // Drain the command queue on the game main thread.
 static void drain_queue() {
     resolve_functions();
+    tick_burst();
     for (;;) {
         std::shared_ptr<Request> req;
         {
@@ -461,8 +536,9 @@ static void drain_queue() {
             if (g_queue.empty()) break;
             req = g_queue.front();
             g_queue.pop_front();
-            g_current = req;
+            if (!is_burst(req->cmd, req->args)) g_current = req;
         }
+        if (is_burst(req->cmd, req->args)) { start_burst(req); continue; } // answered by finish_burst
         jm::Value result = handle_command(req->cmd, req->args);
         {
             std::lock_guard<std::mutex> lk(g_qmtx);
@@ -496,6 +572,7 @@ static void fail_outstanding_requests() {
         complete_request(current, r);
     }
     for (const std::shared_ptr<Request>& req : pending) complete_request(req, shutting_down_result());
+    if (g_burst.req) finish_burst(false, "the game quit during the burst"); // main thread, like PRERENDER
 }
 
 // Enqueue a command and wait for the main thread to process it.
@@ -510,8 +587,12 @@ static jm::Value call_on_main(const std::string& cmd, const jm::Value& args) {
         if (!g_server_running) return shutting_down_result();
         g_queue.push_back(req);
     }
+    // A burst spans frames: allow 100 ms per frame it waits for, plus the usual margin.
+    long long waitMs = 10000;
+    if (is_burst(cmd, args))
+        waitMs = (long long)std::min(argi(args, "frames", 1), kMaxBurstFrames) * std::max(1, argi(args, "everyN", 1)) * 100 + 5000;
     std::unique_lock<std::mutex> lk(req->m);
-    if (!req->cv.wait_for(lk, std::chrono::seconds(10), [&] { return req->done; })) {
+    if (!req->cv.wait_for(lk, std::chrono::milliseconds(waitMs), [&] { return req->done; })) {
         jm::Value r = jm::Value::MkObj();
         r.set("ok", false);
         r.set("error", "timed out waiting for the game main thread (is the game blocked?)");

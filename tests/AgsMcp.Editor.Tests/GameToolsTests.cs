@@ -23,6 +23,24 @@ namespace AgsMcp.Editor.Tests
             Assert.Equal(code, KeyMap.Resolve(name));
         }
 
+        [Fact]
+        public void FindLogLine_FindsTheFirstMatchAtOrAfterSince()
+        {
+            var lines = new[] { "Script : MCPKEY 65", "Game : (room:1) Running on_key_press", "Script : MCPKEY 372", "Script : MCPKEY 365" };
+            Assert.Equal(0, GameWait.FindLogLine(lines, "MCPKEY", 0));
+            Assert.Equal(2, GameWait.FindLogLine(lines, "MCPKEY", 1));
+            Assert.Equal(3, GameWait.FindLogLine(lines, @"MCPKEY 36\d", 0));
+            Assert.Equal(-1, GameWait.FindLogLine(lines, "MCPTXT", 0));
+            Assert.Equal(-1, GameWait.FindLogLine(lines, "MCPKEY", 4)); // since past the end
+            Assert.Equal(0, GameWait.FindLogLine(lines, "MCPKEY", -5));
+        }
+
+        [Fact]
+        public void FindLogLine_RefusesABadPattern()
+        {
+            Assert.ThrowsAny<System.ArgumentException>(() => GameWait.FindLogLine(new[] { "x" }, "(", 0));
+        }
+
         [Theory]
         [InlineData("A", 65)]
         [InlineData("a", 65)]

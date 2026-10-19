@@ -264,13 +264,13 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 | `runtime_enable_plugin` | Enable the `agsmcp` engine plugin for the project (then `save_project`). |
 | `runtime_disable_plugin` | Disable it again (then `save_project`); `build_game mode=release` also does this and removes the copied DLL. |
 | `game_state` | Live snapshot: room, player, characters, objects (views numbered as in the editor), mouse, score, interface-enabled, cutscene and paused flags, recent events. |
-| `game_screenshot([outPath])` | Capture the running game as a PNG, or write it to `outPath`. |
+| `game_screenshot([outPath], [frames], [everyN])` | Capture the running game as a PNG, or write it to `outPath`. `frames > 1` is a burst, one frame every `everyN` game frames, written to the `outPath` directory as `frame-NNN.png` plus `frames.json` (per-frame times). |
 | `game_click(x, y, [button])` | Move the mouse and click (real input; moves the OS cursor). |
 | `game_process_click(x, y, [mode], [inventory])` | Click at room coordinates in a cursor mode, as a player would (queued; `inventory` selects the item for UseInv). |
 | `game_key(key)` | Simulate a key press (letter/digit/`Space`/`Enter`/`F5`/arrows… or a raw code). Navigation and function keys are posted to the game window as real keys. |
 | `game_type(text)` | Type text as character input for GUI text boxes and `on_text_input`. |
 | `game_hover_name(x, y)` | The name of whatever is at a screen point. |
-| `game_wait_until(condition, [room], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or time out. |
+| `game_wait_until(condition, [room], [pattern], [sinceLine], [timeoutMs], [stableMs])` | Poll until `room`/`interfaceEnabled`/`idle`/`ready` holds for `stableMs`, or until a game log line matches the regex `pattern` (`logLine`, from `sinceLine`), or time out. |
 | `game_get_global_int(index)` / `game_set_global_int(index, value)` | Read/write a legacy GlobalInt. |
 | `game_call_function(name, [args], [roomScript])` | Queue a function defined in GlobalScript.asc, or with `roomScript=true` in the current room's `roomN.asc` (0–2 integer args; refused if that script does not define it). Keep it non-blocking. |
 | `game_text_extent(font, text)` | Width and height of one line as the running game draws it (engine `GetTextExtent`; TTF fonts too). |
