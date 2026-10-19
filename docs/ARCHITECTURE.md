@@ -46,6 +46,8 @@ MCP client ───HTTP (MCP Streamable HTTP, JSON responses)──► AGS.Plug
 - Requests with a non-local `Origin` header (including `null`) get 403, which blocks DNS rebinding.
 - Every tool carries `readOnlyHint` or `destructiveHint` annotations. Bad input is reported by throwing `ToolException`.
 - **`tools/call` refuses arguments the tool's schema does not declare** and names the ones it takes. Handlers only read declared keys, so an undeclared one (`id=` where a room tool takes `number=`) used to be dropped and the call half-succeeded. A tool with no `InputSchema` is not checked.
+- **`batch`** (`Tools/BatchTools.cs`) runs `[{name, arguments}]` in order through `McpServer.InvokeTool`, the same path as `tools/call` (undeclared-argument check, executor, error mapping), so a call behaves exactly as on its own. `batch` itself is `RunOnUiThread = false` with a 10-minute timeout; each inner UI-thread call takes the dispatcher gate in turn, so editor work stays one call at a time and another client's call can run between two of a batch's calls. It returns `{results:[{name, ok, content|error}], stopped}`: text that is a JSON object or array is embedded parsed, an image becomes `<image omitted, N bytes; use outPath>`. `stopOnError` (default true) stops after the first failure; `stopped` is true only when calls were skipped. A nested `batch` is refused per call. This replaces per-tool array forms (decision: every schema keeps one typed form).
+- **`outPath`** on `render_room`, `get_sprite` and `game_screenshot` (`Tools/ImageOutput.cs`) writes the PNG to an absolute path (folders created) and returns `{path, width, height, note}` text with no image.
 - The `Mcp/` folder has no editor dependency, so it is unit-tested directly.
 
 ### Threading (`Ui/UiDispatcher.cs`)
@@ -55,7 +57,7 @@ MCP client ───HTTP (MCP Streamable HTTP, JSON responses)──► AGS.Plug
 - If a modal dialog is open on the UI thread, the call is refused with a "dialog box open" error. That covers a modal `Form` and a visible Win32 dialog (class `#32770`, such as a `MessageBox`, which is not in `Application.OpenForms`). Otherwise the queued work would run re-entrantly inside the dialog's message loop.
 - If a call times out, the work stays queued, and the gate is released only once that work actually finishes.
 - Every tool call runs with a plain base `SynchronizationContext` installed (restored afterwards). `AGSEditor.SaveGameFiles()` reaches `TaskScheduler.FromCurrentSynchronizationContext()` through the recent-games `Debouncer`, which throws on a null context and aborted saves before any file was written. A `WindowsFormsSynchronizationContext` does not work: WinForms uninstalls it when a form handle is destroyed mid-save (the save progress dialog).
-- Tools that only talk to the game process or read its log (`stop_game`, `game_status`, `get_game_log` and every `game_*` tool) set `RunOnUiThread = false`. They can be polled while a build runs and never block the editor.
+- Tools that only talk to the game process or read its log (`stop_game`, `game_status`, `get_game_log` and every `game_*` tool), and `batch`, which dispatches each of its calls itself, set `RunOnUiThread = false`. They can be polled while a build runs and never block the editor.
 
 ### Editor UI and settings
 - An **MCP** menu: Start/Stop, Copy endpoint URL, Client setup (a dialog with the setup for Claude Code, Codex, Gemini CLI, generic HTTP and `mcp-remote`, built by `Ui/ClientSetup.cs` from the current port), Status, change port, open the plugin log.
@@ -192,7 +194,7 @@ src/AgsMcp.Editor/
 
 ## Testing
 
-- **Unit tests:** `.\build.ps1 -Test` (xUnit, `tests/AgsMcp.Editor.Tests`). They cover JSON-RPC handling, the HTTP transport, script text edits, property reflection and conversion, room entity refs, mask shapes and polygon scanlines, sprite transparency and view parsing, audio file types, cache names, script names and usage matching, engine arguments and log slicing, key mapping and wait conditions.
+- **Unit tests:** `.\build.ps1 -Test` (xUnit, `tests/AgsMcp.Editor.Tests`). They cover JSON-RPC handling, the HTTP transport, script text edits, property reflection and conversion, room entity refs, mask shapes and polygon scanlines, sprite transparency and view parsing, audio file types, cache names, script names and usage matching, engine arguments and log slicing, key mapping and wait conditions, batch calls and `outPath` validation.
 - **Live check:** run `.\build.ps1 -Deploy -Run`, then call the tools over HTTP:
   ```powershell
   Invoke-WebRequest http://127.0.0.1:7471/mcp -Method Post -ContentType application/json `

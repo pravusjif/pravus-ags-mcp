@@ -52,6 +52,7 @@ namespace AgsMcp.Editor
             _mcp.AddTools(AudioTools.Create(context));
             _mcp.AddTools(BuildRunTools.Create(context));
             _mcp.AddTools(GameTools.Create(context));
+            _mcp.AddTools(BatchTools.Create(_mcp));
 
             CreateMenu();
             if (_settings.AutoStart) StartServer(showErrors: false);

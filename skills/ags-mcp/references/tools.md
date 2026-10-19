@@ -19,6 +19,7 @@ A key a tool does not take is refused with the list of the ones it does.
 | `save_project` | Writes `Game.agf`, `acsprset.spr` (sprites), scripts and the loaded room. Cheap; call it after any entity/sprite/view change and before `run_game`. |
 | `list_entities type` | `character`, `inventory`, `dialog`, `gui`, `view`, `cursor`, `font`, `audioclip`, `audiocliptype`, `audiofolder`, `globalvariable`, `customproperty`. Returns `{id, name}`; `id` strings. |
 | `find_usages name` | Whole-word search across modules, room scripts and dialog scripts. Use before renames/deletes. |
+| `batch calls [stopOnError]` | `calls` is `[{name, arguments}]`, run in order in one request: use it for bulk passes (many `set_properties`, `import_sprite` per frame) instead of one call each. Returns `{results:[{name, ok, content|error}], stopped}`; JSON text comes back parsed, images as a note (use `outPath`). Stops at the first failure unless `stopOnError=false`; no nesting. |
 | `create_project folder [template gameName fileName]` / `open_project path` | Replace the open game. Use them only when the user asks for a new or different game; everything else happens in the open one. Both save the current one first unless `saveCurrent=false`. `open_project` cannot reopen the game that is already open (the editor's lock file), so "reload from disk" means restarting the editor. |
 
 ## Game data (entities)
@@ -61,7 +62,7 @@ All room tools load the room in the editor (switching away from whatever was loa
 | `create_room_object N [properties]` | `{Name, Description, Image, StartX, StartY, Visible, Clickable, Baseline}`. `StartX/StartY` = bottom-left of the sprite. IDs are sequential; returns the `id`. |
 | `delete_room_object N object` | By ID or name; renumbers higher IDs. |
 | `set_room_event N entity event [function]` | `entity`: `room`, `hotspot:K`/`hDoor`, `object:K`/`oKey`, `region:K`. Room events: `Load`, `AfterFadeIn`, `FirstLoad`, `RepExec`, `Leave`, `Unload`, `LeaveLeft/Right/Top/Bottom`. Hotspot/object: `Look`, `Interact`, `Talk`, `UseInv`, `PickUp`, `AnyClick`, `WalkOn`, `MouseMove`. Region: `WalksOnto`, `WalksOff`, `Standing`. Default function `<item>_<event>` (`hDoor_Look`, `oKey_Interact`, `region1_WalksOnto`, `room_Load`). Adds the stub with the correct parameter list to `roomN.asc`. Pass `function=` to bind a second event to an existing handler (e.g. `oKey PickUp function=oKey_Interact`) instead of adding a stub. |
-| `render_room N [mask] [background]` | PNG of the background; with `mask`, each area in a distinct colour with a legend in the text. Use it to check masks and object placement. |
+| `render_room N [mask] [background] [outPath]` | PNG of the background; with `mask`, each area in a distinct colour with a legend in the text. Use it to check masks and object placement. `outPath` (absolute) writes the file and returns `{path, width, height, note}` (the legend is in `note`). |
 | `get_mask_pixel N mask x y` | Area number at a pixel, 0 = none. Good for spot-checking a walkable floor or a region. |
 
 ## Assets
@@ -69,7 +70,7 @@ All room tools load the room in the editor (switching away from whatever was loa
 | Tool | Notes |
 |---|---|
 | `import_sprite path\|base64 [folder] [transparency] [alpha]` | Returns `{number, width, height}`. Default transparency `LeaveAsIs` keeps PNG alpha in 32-bit games. Write the returned numbers down; they are what `Image`, views and `Graphic` refer to. |
-| `get_sprite number` | PNG; use it to see what an existing sprite looks like. |
+| `get_sprite number [outPath]` | PNG; use it to see what an existing sprite looks like. `outPath` (absolute) writes the file and returns `{path, width, height, note}` only. |
 | `replace_sprite number path\|base64` | Keeps the number, so references stay valid. Use it to iterate on art. |
 | `delete_sprite number` | Refuses with a usage report if a view/object/character still uses it. |
 | `create_view [name] loops` | `loops` is an array of `{frames, runNextLoop?}`; a frame is `{sprite, delay?, flipped?, sound?}`. Every sprite must exist. `sound` is an audio clip's **index** (from `import_audio`), not its ID. Loop 0 is "down" for walking views (0 down, 1 left, 2 right, 3 up; 4–7 diagonals). Script constant = upper-cased name. |
@@ -109,7 +110,7 @@ See playtesting.md for the loop. Quick shapes:
 | `game_click x y [button]` | Raw screen click; this is what dismisses a `Display()` box or presses a GUI button. |
 | `game_hover_name x y` | What a click there would hit. Check before clicking near the player. It does not move the mouse. |
 | `game_wait_until condition [room] [timeoutMs] [stableMs]` | `ready` (interface enabled and player idle, stable for `stableMs`), `room`, `idle`, `interfaceEnabled`. Returns `met` and the final `state`. Keep `timeoutMs` at 45000 or less and chain waits: many clients abandon a call after about 60 s. |
-| `game_screenshot` | PNG of the window. |
+| `game_screenshot [outPath]` | PNG of the window; `outPath` (absolute) writes the file instead. |
 | `game_key key` | `"Tab"`, `"Enter"`, `"Escape"`, `"Space"`, `"F5"`, letters, digits. In the standard templates Tab opens the inventory and Escape the control panel. Arrow keys and F7 are unreliable (they can arrive as other keys); call the script function they would trigger instead. Letters do not reach a GUI text box. |
 | `game_call_function name [args]` | Runs a function defined in `GlobalScript.asc` with up to two int args; refused if GlobalScript does not define it (a hook in another module needs a GlobalScript wrapper). Keep it non-blocking: no `Say`, `Display`, `Wait` or `eBlock`. |
 | `game_get_global_int` / `game_set_global_int` | Legacy GlobalInts only; exported script variables are not reachable this way. |

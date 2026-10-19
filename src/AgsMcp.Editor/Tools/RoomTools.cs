@@ -170,6 +170,7 @@ namespace AgsMcp.Editor.Tools
                 .Required("number", NumberProp())
                 .Optional("mask", Schema.String("Area mask to overlay.", "none", "hotspots", "walkbehinds", "walkableareas", "regions"))
                 .Optional("background", Schema.Integer("Background frame index (default 0)."))
+                .Optional(ImageOutput.Arg, ImageOutput.Prop())
                 .Build(),
             Annotations = ToolAnnotations.ReadOnlyTool,
             Timeout = TimeSpan.FromSeconds(90),
@@ -182,6 +183,7 @@ namespace AgsMcp.Editor.Tools
                 RoomAreaMaskType mask = ParseMask(args.String("mask", "none"));
 
                 byte[] png;
+                int width, height;
                 List<int> areas = null;
                 using (Bitmap bmp = EditorInternals.GetRoomBackgroundForPreview(room, bg))
                 {
@@ -189,14 +191,14 @@ namespace AgsMcp.Editor.Tools
                         using (Bitmap maskBmp = EditorInternals.ExportAreaMask(room, mask))
                             areas = OverlayMask(bmp, ReadMask(maskBmp));
                     png = ToPng(bmp);
+                    width = bmp.Width;
+                    height = bmp.Height;
                 }
 
-                var result = new ToolResult();
                 string legend = areas == null ? "" : areas.Count == 0 ? " The mask is empty."
                     : " Areas: " + string.Join(", ", areas.Select(a => a + "=" + ColorName(AreaColor(a)))) + ".";
-                result.AddText($"Room {room.Number} background {bg}{(mask == RoomAreaMaskType.None ? "" : " with " + mask + " mask")} ({room.Width}x{room.Height}).{legend}");
-                result.AddImage(png, "image/png");
-                return result;
+                string note = $"Room {room.Number} background {bg}{(mask == RoomAreaMaskType.None ? "" : " with " + mask + " mask")} ({room.Width}x{room.Height}).{legend}";
+                return ImageOutput.Result(args, png, width, height, note);
             },
         };
 

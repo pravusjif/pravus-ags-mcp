@@ -10,7 +10,7 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 
 - [x] 1. Housekeeping: installer repo name, package hygiene, `SmokeGame` setting, headless-compile fallback in the skill — landed in "Housekeeping: installer repo name, SmokeGame, package hygiene, headless compile"; live gate passed in "build.ps1 -Run: load SmokeGame.ps1, live gate for housekeeping".
 - [x] 2. Script hygiene: CRLF everywhere, `staleOnDisk` detection, `reload_script` — `set_dialog_script`/`set_event` write CRLF through `ScriptTools.Save`, `read_script`/`compile` report `staleOnDisk`, new `reload_script`; "Script hygiene: CRLF dialog scripts, staleOnDisk, reload_script".
-- [ ] 3. `batch` tool and `outPath` on the image tools
+- [x] 3. `batch` tool and `outPath` on the image tools — `McpServer.InvokeTool`, `Tools/BatchTools.cs`, `Tools/ImageOutput.cs` on `render_room`/`get_sprite`/`game_screenshot`; "batch tool and outPath on the image tools".
 - [ ] 4. `list_sprites`, `create_sprite_folder`, `move_script_module`
 - [ ] 5. GUI controls: list/create/delete, `guicontrol` entity kind, GUI events in `set_event`
 - [ ] 6. Engine-plugin toggle, `build_game`/`run_game` modes, `project_info` state, run robustness
@@ -53,6 +53,8 @@ A complete game was built through this server. Its project accumulated ~40 helpe
 16. (2026-10-19, owner) Live gates never block on the owner. `SmokeGame` is optional: `tools/SmokeGame.ps1` defaults it to `%LOCALAPPDATA%\AGS-MCP\SmokeGame\Game.agf` and creates it by extracting the Sierra-style `.agt`. `build.ps1 -StopEditor` calls `save_project` on the running server, then kills the editor whatever project is open, even when the save fails. An unattended session may run `-StopEditor` with any project open and may leave the smoke game open afterwards.
 17. (2026-10-19) `reload_script` reloads a room script in place (`Script.LoadFromDisk()`) instead of `UnloadScript()` + `LoadScript()`: the loaded `Room` and its `UnloadedRoom` share one `Script` object, and a fresh one would leave the loaded room compiling the old text.
 18. (2026-10-19) `staleOnDisk` ignores newline style and trailing newlines (only a save round-trip changes those); on `compile` it is a list of stale files among the compiled bodies and all module headers, since a stale header changes the compile too.
+19. (2026-10-19) `batch` embeds a call's JSON text parsed (other text stays a string), so a reply is not JSON inside JSON strings; the batch result itself is never `isError` (per-call `ok` carries failures), and `stopped` is true only when later calls were skipped. It is annotated destructive, since its calls may be.
+20. (2026-10-19) `outPath` returns `{path, width, height, note}`: `note` keeps the text the tool returns beside the image (`render_room`'s mask legend). Parent folders are created; only rooted drive or UNC paths are accepted (`ImageOutput.IsAbsolutePath`).
 
 ## Verified facts (AGS 3.6.2.21 source and this repo)
 

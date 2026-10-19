@@ -170,6 +170,7 @@ take is refused, with the list of the ones it does.
 |------|-------------|
 | `project_info` | Name, folder, resolution, colour depth, editor version and entity counts. |
 | `save_project` | Write all in-memory changes to disk (`Game.agf`, scripts, sprites, the loaded room). |
+| `batch(calls, [stopOnError])` | Run several tool calls `[{name, arguments}]` in order in one request; returns each call's `ok` and `content` or `error` (JSON text parsed, images replaced by a note). Stops at the first failure unless `stopOnError=false`. |
 | `create_project(folder, [template], [gameName], [fileName], [saveCurrent])` | Create a game from an editor template (Sierra-style, Empty Game, …) in a new or empty folder and open it. |
 | `open_project(path, [saveCurrent])` | Open another game (`Game.agf` or its folder) in the editor. |
 | `list_entities(type)` | List entities of a type (character, inventory, dialog, gui, view, cursor, font, audioclip, audiocliptype, audiofolder, globalvariable, customproperty). |
@@ -209,7 +210,7 @@ take is refused, with the list of the ones it does.
 | `import_room_mask(number, mask, path\|base64)` | Replace a mask with an indexed image (palette index = area). |
 | `get_room_properties(number, entity)` / `set_room_properties(number, entity, properties)` | Properties of the room or a hotspot, object, region, walkable area or walk-behind (by ID or script name). |
 | `create_room_object(number, [properties])` / `delete_room_object(number, object)` | Add or remove a room object. |
-| `render_room(number, [mask], [background])` | Render a background to PNG, optionally overlaying a mask with a colour legend. |
+| `render_room(number, [mask], [background], [outPath])` | Render a background to PNG, optionally overlaying a mask with a colour legend. `outPath` writes the PNG to that absolute path and returns `{path, width, height, note}` instead of the image. |
 | `get_mask_pixel(number, mask, x, y)` | The area number at a pixel of a room mask (0 = none). |
 | `set_room_event(number, entity, event, [function])` | Bind a `room`/`hotspot:N`/`object:N`/`region:N` event to a function and add a stub to the room script. |
 
@@ -221,7 +222,7 @@ the room script.
 | Tool | Description |
 |------|-------------|
 | `import_sprite(path\|base64, [folder], [transparency], [alpha])` | Import a sprite into a folder (or the root). |
-| `get_sprite(number)` | Return a sprite as a PNG. |
+| `get_sprite(number, [outPath])` | Return a sprite as a PNG, or write it to `outPath`. |
 | `replace_sprite(number, path\|base64, …)` | Replace a sprite's image, keeping its number. |
 | `delete_sprite(number)` | Delete a sprite (refuses with a usage report if still referenced). |
 | `create_view([name], loops)` | Create a view; `loops` is an array of `{frames, runNextLoop?}` and each frame is `{sprite, delay?, flipped?, sound?}` (`sound` is an audio clip's index). |
@@ -252,7 +253,7 @@ The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` 
 |------|-------------|
 | `runtime_enable_plugin` | Enable the `agsmcp` engine plugin for the project (then `save_project`). |
 | `game_state` | Live snapshot: room, player, characters, objects (views numbered as in the editor), mouse, score, interface-enabled, cutscene and paused flags, recent events. |
-| `game_screenshot` | Capture the running game as a PNG. |
+| `game_screenshot([outPath])` | Capture the running game as a PNG, or write it to `outPath`. |
 | `game_click(x, y, [button])` | Move the mouse and click (real input; moves the OS cursor). |
 | `game_process_click(x, y, [mode], [inventory])` | Click at room coordinates in a cursor mode, as a player would (queued; `inventory` selects the item for UseInv). |
 | `game_key(key)` | Simulate a key press (letter/digit/`Space`/`Enter`/`F5`/arrows… or a raw code). |

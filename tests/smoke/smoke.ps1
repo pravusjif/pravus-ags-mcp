@@ -115,6 +115,10 @@ try {
         $info = Get-Json (Invoke-Mcp "project_info")
         $info.gameName -eq "MCP Smoke" -and (Split-Path -Leaf $info.projectFolder) -eq (Split-Path -Leaf $Folder)
     }
+    Check "batch runs project_info and list_rooms in one call" {
+        $r = Get-Json (Invoke-Mcp "batch" @{ calls = @(@{ name = "project_info" }, @{ name = "list_rooms" }) })
+        -not $r.stopped -and $r.results.Count -eq 2 -and $r.results[0].ok -and $r.results[0].content[0].gameName -eq "MCP Smoke" -and $r.results[1].ok
+    }
     Check "list_entities character lists cEgo" {
         $e = Get-Json (Invoke-Mcp "list_entities" @{ type = "character" })
         ($e | ConvertTo-Json -Depth 10) -match "cEgo"
@@ -168,6 +172,14 @@ try {
         $r.size.width -eq 320 -and $r.hotspots.Count -gt 0
     }
     Check "render_room(1) returns a PNG image" { Has-Image (Invoke-Mcp "render_room" @{ number = 1 }) }
+    Check "render_room and get_sprite outPath write PNG files and return text only" {
+        $room = Join-Path $Folder "out\room1.png"; $sprite = Join-Path $Folder "out\sprite0.png"
+        $r = Invoke-Mcp "render_room" @{ number = 1; outPath = $room }
+        $s = Invoke-Mcp "get_sprite" @{ number = 0; outPath = $sprite }
+        $j = Get-Json $r
+        -not (Has-Image $r) -and -not (Has-Image $s) -and (Get-Item $room).Length -gt 0 -and (Get-Item $sprite).Length -gt 0 -and
+            $j.width -gt 0 -and $j.path -eq $room
+    }
     Check "get_mask_pixel reads the walkable mask" {
         $r = Get-Json (Invoke-Mcp "get_mask_pixel" @{ number = 1; mask = "WalkableAreas"; x = 160; y = 140 })
         $r -ne $null
@@ -354,6 +366,11 @@ try {
         $c.queued -eq $true -and $w.met -eq $true
     }
     Check "game_screenshot returns a PNG" { Has-Image (Invoke-Mcp "game_screenshot") }
+    Check "game_screenshot outPath writes the PNG" {
+        $shot = Join-Path $Folder "out\shot.png"
+        $j = Get-Json (Invoke-Mcp "game_screenshot" @{ outPath = $shot })
+        (Get-Item $shot).Length -gt 0 -and $j.width -gt 0
+    }
     Check "stop_game stops the game" { (Get-Json (Invoke-Mcp "stop_game")).stopped -eq $true }
 }
 finally {

@@ -96,8 +96,8 @@ namespace AgsMcp.Editor.Tools
         {
             Name = "game_screenshot",
             Title = "Game screenshot",
-            Description = "Capture a screenshot of the running game and return it as a PNG image.",
-            InputSchema = Schema.Object().Build(),
+            Description = "Capture a screenshot of the running game and return it as a PNG image, or write it to outPath.",
+            InputSchema = Schema.Object().Optional(ImageOutput.Arg, ImageOutput.Prop()).Build(),
             Annotations = ToolAnnotations.ReadOnlyTool,
             RunOnUiThread = false,
             Handler = args =>
@@ -109,16 +109,16 @@ namespace AgsMcp.Editor.Tools
                     throw new ToolException("The game reported a screenshot at '" + path + "' but it could not be read.");
 
                 byte[] png;
+                int width, height;
                 using (var bmp = new Bitmap(path))
                 using (var ms = new MemoryStream())
                 {
                     bmp.Save(ms, ImageFormat.Png);
                     png = ms.ToArray();
+                    width = bmp.Width;
+                    height = bmp.Height;
                 }
-                var result = new ToolResult();
-                result.AddText("Screenshot of the running game (" + path + ").");
-                result.AddImage(png, "image/png");
-                return result;
+                return ImageOutput.Result(args, png, width, height, "Screenshot of the running game (" + path + ").");
             },
         };
 

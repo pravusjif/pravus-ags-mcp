@@ -81,7 +81,10 @@ namespace AgsMcp.Editor.Tools
             Name = "get_sprite",
             Title = "Get sprite",
             Description = "Return a sprite's image as a PNG, by sprite number. Reads only.",
-            InputSchema = Schema.Object().Required("number", Schema.Integer("The sprite number.")).Build(),
+            InputSchema = Schema.Object()
+                .Required("number", Schema.Integer("The sprite number."))
+                .Optional(ImageOutput.Arg, ImageOutput.Prop())
+                .Build(),
             Annotations = ToolAnnotations.ReadOnlyTool,
             Timeout = TimeSpan.FromSeconds(90),
             Handler = args =>
@@ -92,11 +95,8 @@ namespace AgsMcp.Editor.Tools
                     ?? throw new ToolException($"No sprite numbered {n}.");
                 using (Bitmap bmp = EditorInternals.GetSpriteBitmap(n))
                 {
-                    byte[] png = ToPng(bmp);
-                    var result = new ToolResult();
-                    result.AddText($"Sprite {n} ({bmp.Width}x{bmp.Height}, {sprite.ColorDepth}-bit{(sprite.AlphaChannel ? ", alpha" : "")}).");
-                    result.AddImage(png, "image/png");
-                    return result;
+                    string note = $"Sprite {n} ({bmp.Width}x{bmp.Height}, {sprite.ColorDepth}-bit{(sprite.AlphaChannel ? ", alpha" : "")}).";
+                    return ImageOutput.Result(args, ToPng(bmp), bmp.Width, bmp.Height, note);
                 }
             },
         };
