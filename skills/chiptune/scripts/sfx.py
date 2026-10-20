@@ -1,11 +1,10 @@
-"""Small helpers for synthesising game sound effects, ambience and music with numpy, for AGS audio clips.
+"""Small helpers for synthesising game sound effects, ambience and music with numpy.
 
-Everything is mono float arrays at RATE Hz, roughly -1..1; write_wav() writes 16-bit PCM WAV, which
-import_audio takes as is. Nothing is sampled: oscillators, modal "struck object" synthesis, FFT-shaped
-noise and a noise-tail reverb cover most adventure-game sounds. Seed the RNG so a clip regenerates
-identically.
+Everything is float arrays at RATE Hz, roughly -1..1: mono (N,) or stereo (N, 2). write_wav() writes
+16-bit PCM WAV. Nothing is sampled: band-limited oscillators, modal "struck object" synthesis, FFT-shaped
+noise and a noise-tail reverb cover most game sounds. Seed the RNG so a clip regenerates identically.
 
-    from sfx import (RATE, seed, n, note, osc, sweep, modes, noise, burst, creak, adsr, fade, lfo,
+    from sfx import (RATE, set_rate, seed, n, note, osc, sweep, modes, noise, burst, creak, adsr, fade, lfo,
                      loop_safe, mix, place, reverb, level, limit, check_oneshot, check_loop, write_wav)
 
 Loops: build them from parts that are periodic over the loop length -- noise(..., circular=True),
@@ -23,10 +22,17 @@ from pathlib import Path
 
 import numpy as np
 
-RATE = 22050
+RATE = 44100
 _R = np.random.default_rng(1)
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 _FLATS = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#", "Cb": "B", "Fb": "E"}
+
+
+def set_rate(hz):
+    """Change the sample rate for everything made after this call (44100 default; 22050 halves file sizes
+    and render times at the cost of anything above 10 kHz, which chip voices barely have)."""
+    global RATE
+    RATE = int(hz)
 
 
 def seed(s):
@@ -59,9 +65,23 @@ def silence(seconds):
 
 # --- sources -------------------------------------------------------------------------------
 
-def osc(hz, seconds, wave="sine", phase=0.0):
-    """An oscillator: 'sine', 'square', 'saw' or 'triangle'. hz may be an array (one value per sample) to glide.
-    Square/saw/triangle are naive (they alias a little at high pitch); keep them under ~2 kHz or filter them."""
+def _polyblep(t, dt):
+    """The polynomial band-limited step correction for a discontinuity at t = 0 (t in 0..1 per cycle)."""
+    y = np.zeros_like(t)
+    m = t < dt
+    u = t[m] / dt[m]
+    y[m] = u + u - u * u - 1.0
+    m = t > 1.0 - dt
+    u = (t[m] - 1.0) / dt[m]
+    y[m] = u * u + u + u + 1.0
+    return y
+
+
+def osc(hz, seconds, wave="sine", phase=0.0, duty=0.5, clean=True):
+    """An oscillator: 'sine', 'square' (with a duty cycle), 'saw' or 'triangle'. hz may be an array (one value
+    per sample) to glide. Square and saw are band-limited (polyBLEP) unless clean=False, which gives the raw
+    aliasing steps of a naive digital oscillator: harsher, more "chip". The triangle is naive (its harmonics
+    fall at 1/k^2, so it barely aliases)."""
     count = n(seconds)
     f = np.broadcast_to(np.asarray(hz, dtype=float), (count,)) if np.ndim(hz) == 0 else np.asarray(hz, dtype=float)[:count]
     ph = phase + 2 * np.pi * np.cumsum(f) / RATE
@@ -69,9 +89,16 @@ def osc(hz, seconds, wave="sine", phase=0.0):
         return np.sin(ph)
     frac = (ph / (2 * np.pi)) % 1.0
     if wave == "square":
-        return np.where(frac < 0.5, 1.0, -1.0)
+        x = np.where(frac < duty, 1.0, -1.0)
+        if clean:
+            dt = np.maximum(np.abs(f) / RATE, 1e-9)
+            x = x + _polyblep(frac, dt) - _polyblep((frac + 1.0 - duty) % 1.0, dt)
+        return x
     if wave == "saw":
-        return 2.0 * frac - 1.0
+        x = 2.0 * frac - 1.0
+        if clean:
+            x = x - _polyblep(frac, np.maximum(np.abs(f) / RATE, 1e-9))
+        return x
     if wave == "triangle":
         return 1.0 - 4.0 * np.abs(frac - 0.5)
     raise ValueError("wave must be sine, square, saw or triangle")
@@ -90,7 +117,8 @@ def modes(freqs, decays, amps, seconds, attack=0.0008):
     t = tt(n(seconds))
     out = np.zeros(len(t))
     for f, d, a in zip(freqs, decays, amps):
-        out += a * np.sin(2 * np.pi * f * t) * np.exp(-t / d)
+        if f < RATE / 2:
+            out += a * np.sin(2 * np.pi * f * t) * np.exp(-t / d)
     return out * (1.0 - np.exp(-t / attack))
 
 
@@ -144,13 +172,16 @@ def adsr(seconds, attack=0.005, decay=0.05, sustain=0.7, release=0.1):
 
 
 def fade(x, in_s=0.002, out_s=0.05):
-    """Fade the ends so a one-shot starts and ends at silence (no click)."""
+    """Fade the ends so a one-shot starts and ends at silence (no click). Mono or stereo."""
     x = np.array(x, dtype=float)
     a, b = min(n(in_s), len(x)), min(n(out_s), len(x))
+    ramp_in, ramp_out = np.linspace(0, 1, a), np.cos(np.linspace(0, np.pi / 2, b)) ** 2
+    if x.ndim == 2:
+        ramp_in, ramp_out = ramp_in[:, None], ramp_out[:, None]
     if a:
-        x[:a] *= np.linspace(0, 1, a)
+        x[:a] *= ramp_in
     if b:
-        x[-b:] *= np.cos(np.linspace(0, np.pi / 2, b)) ** 2
+        x[-b:] *= ramp_out
     return x
 
 
@@ -185,13 +216,17 @@ def place(buf, ev, at, wrap=False):
     return buf
 
 
-def reverb(x, seconds, wet, lo=80, hi=6000, circular=False):
-    """A room: x plus 'wet' times x convolved with decaying filtered noise ('seconds' long). circular for loops.
-    A one-shot's tail is cut at len(x): pad it with silence first if the tail must ring out."""
+def reverb(x, seconds, wet, lo=80, hi=6000, circular=False, predelay=0.0):
+    """A room: x plus 'wet' times x convolved with decaying filtered noise ('seconds' long, after 'predelay').
+    circular for loops. A one-shot's tail is cut at len(x): pad it with silence first if the tail must ring out.
+    Each call draws a new noise tail, so two calls give two decorrelated rooms (a stereo pair)."""
     m = n(seconds)
     ir = _R.standard_normal(m) * np.exp(-tt(m) / (seconds / 6.0)) * (1 - np.exp(-tt(m) / 0.008))
     ir = shape(ir, lo, hi)
     ir /= np.sqrt(np.sum(ir ** 2))
+    if predelay:
+        ir = np.concatenate([np.zeros(n(predelay)), ir])
+        m = len(ir)
     size = len(x) if circular else len(x) + m
     if circular and m > len(x):
         raise ValueError("a circular reverb must be shorter than the loop")
@@ -218,16 +253,23 @@ def limit(x, ceiling_db=-1.0, knee=0.6):
     return np.sign(x) * a
 
 
+def saturate(x, drive=1.5):
+    """Tape-style soft clipping: tanh with the gain normalised, so the level stays and the peaks round off.
+    drive 1.2 is barely there, 2-3 is audible warmth, more is distortion."""
+    x = np.asarray(x, dtype=float)
+    return np.tanh(x * drive) / np.tanh(drive)
+
+
 def level(x, rms_db=None, peak_db=-3.0, remove_dc=False, soft=False):
     """Scale to an RMS target (if given) without letting the peak pass peak_db; else peak to peak_db.
     With soft=True the RMS target wins and peaks above peak_db are soft-limited (limit()) instead of
     scaling the whole clip down; keep that to a few dB of limiting or the sound thickens.
     Render loud: in any engine, volume only turns a clip down. Starting targets (tuned by ear in one
-    engine; check in yours): one-shots peak -3 to -1 dBFS; music RMS -18 to -14; beds RMS -26 to -20.
+    engine; check in yours): one-shots peak -3 to -1 dBFS; music RMS -16 to -12; beds RMS -26 to -20.
     remove_dc subtracts the mean first (for loops with an offset; on a one-shot it lifts the faded ends off zero)."""
     x = np.asarray(x, dtype=float)
     if remove_dc:
-        x = x - np.mean(x)
+        x = x - np.mean(x, axis=0)
     if rms_db is not None:
         x = x * (10 ** (rms_db / 20) / (np.sqrt(np.mean(x ** 2)) + 1e-12))
         if soft:
@@ -241,19 +283,21 @@ def level(x, rms_db=None, peak_db=-3.0, remove_dc=False, soft=False):
 
 
 def stats(x):
-    """Duration, peak and RMS (dBFS), the start/end levels relative to the peak, and the loop seam versus typical steps."""
+    """Duration, peak and RMS (dBFS), the start/end levels relative to the peak, and the loop seam versus typical steps.
+    Stereo is judged on its worse channel."""
     x = np.asarray(x, dtype=float)
+    chans = x.T if x.ndim == 2 else x[None, :]
     peak = np.max(np.abs(x)) + 1e-12
     edge = max(1, n(0.005))
-    steps = np.abs(np.diff(x))
+    steps = np.abs(np.diff(chans, axis=1))
     return {
         "seconds": len(x) / RATE,
         "peak_db": db(peak),
         "rms_db": db(np.sqrt(np.mean(x ** 2))),
-        "start": abs(x[0]) / peak,
-        "end": np.max(np.abs(x[-edge:])) / peak,
-        "seam": abs(x[-1] - x[0]),
-        "p99_step": float(np.percentile(steps, 99)) if len(steps) else 0.0,
+        "start": float(np.max(np.abs(chans[:, 0])) / peak),
+        "end": float(np.max(np.abs(chans[:, -edge:])) / peak),
+        "seam": float(np.max(np.abs(chans[:, -1] - chans[:, 0]))),
+        "p99_step": float(np.percentile(steps, 99)) if steps.size else 0.0,
     }
 
 
@@ -282,18 +326,20 @@ def check_loop(x, headroom=1.5):
 
 
 def write_wav(path, x):
-    """Write 16-bit mono PCM WAV at RATE. Values beyond -1..1 are clipped, so level() first."""
-    pcm = np.clip(np.round(np.asarray(x) * 32767.0), -32768, 32767).astype("<i2")
+    """Write 16-bit PCM WAV at RATE: mono from (N,), stereo from (N, 2). Values beyond -1..1 are clipped, so level() first."""
+    x = np.asarray(x, dtype=float)
+    channels = x.shape[1] if x.ndim == 2 else 1
+    pcm = np.ascontiguousarray(np.clip(np.round(x * 32767.0), -32768, 32767).astype("<i2"))
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
+        w.setnchannels(channels)
         w.setsampwidth(2)
         w.setframerate(RATE)
         w.writeframes(pcm.tobytes())
 
 
 def read_wav(path):
-    """Read an 8/16/32-bit PCM WAV as mono floats. Returns (samples, sample_rate)."""
+    """Read an 8/16/32-bit PCM WAV as mono floats (channels averaged). Returns (samples, sample_rate)."""
     with wave.open(str(path), "rb") as w:
         width, channels, rate = w.getsampwidth(), w.getnchannels(), w.getframerate()
         raw = w.readframes(w.getnframes())
@@ -308,19 +354,20 @@ def read_wav(path):
     return x.reshape(-1, channels).mean(axis=1), rate
 
 
-def spectrogram(x, width=640, height=96, rate=RATE):
-    """A greyscale log-frequency (40 Hz - 10 kHz, high at the top) spectrogram strip as a PIL image."""
+def spectrogram(x, width=640, height=96, rate=None):
+    """A greyscale log-frequency (40 Hz - 16 kHz, high at the top) spectrogram strip as a PIL image."""
     from PIL import Image
-    win = 1024
+    rate = rate or RATE
+    win = 2048 if rate > 30000 else 1024
     x = np.asarray(x, dtype=float)
     if len(x) < win * 2:
         x = np.pad(x, (0, win * 2 - len(x)))
-    hop = int(np.clip((len(x) - win) // width, 16, 256))  # short clips still get enough columns
+    hop = int(np.clip((len(x) - win) // width, 16, 512))  # short clips still get enough columns
     frames = 1 + (len(x) - win) // hop
     w = np.hanning(win)
     spec = np.array([np.abs(np.fft.rfft(x[i * hop:i * hop + win] * w)) for i in range(frames)]).T
     freqs = np.fft.rfftfreq(win, 1.0 / rate)
-    rows = np.geomspace(40, min(10000, rate / 2), height)[::-1]
+    rows = np.geomspace(40, min(16000, rate / 2), height)[::-1]
     s = 20 * np.log10(spec[np.clip(np.searchsorted(freqs, rows), 0, len(freqs) - 1)] + 1e-9)
     s = np.clip((s - (s.max() - 70)) / 70, 0, 1)
     return Image.fromarray((s * 255).astype(np.uint8), "L").resize((width, height), Image.BILINEAR)
@@ -335,7 +382,8 @@ def preview(out_png, *paths, width=640, height=96):
     for i, p in enumerate(paths):
         x, rate = read_wav(p)
         sheet.paste(spectrogram(x, width, height, rate), (0, i * cell + 16))
-        draw.text((4, i * cell + 2), f"{Path(p).name}  {len(x) / rate:.2f} s  (40 Hz - 10 kHz, log)", fill=220)
+        top = min(16000, rate // 2)
+        draw.text((4, i * cell + 2), f"{Path(p).name}  {len(x) / rate:.2f} s  (40 Hz - {top // 1000} kHz, log)", fill=220)
     sheet.save(out_png)
     return out_png
 

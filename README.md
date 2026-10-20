@@ -150,13 +150,15 @@ plugin, through its window.
 `skills/ags-mcp/` teaches a coding agent to work on the game you have open through these tools: the persistence
 rules, recipes for rooms, objects, characters, dialogs and scripts, the pitfalls worth knowing, AGS 3.6 scripting
 patterns, checking changes in the running game with the `game_*` tools and a release build with the `desktop_*`
-tools, and helpers for pixel art and sound. It is
+tools, and a helper for pixel art. `skills/chiptune/` is its companion for sound: it composes and synthesises
+music, stingers, ambience and effects with numpy (a score/kit tracker with MIDI export, usable for any engine), and
+the AGS skill imports what it makes. Each is
 a standard `SKILL.md` folder (instructions plus `references/` and `scripts/`), so:
 
 - **Agents that load `SKILL.md` skills** (Claude Code, and others that support the format): put the folder in the
-  agent's skills directory. `install.ps1 -InstallSkill` does this for Claude Code (`~\.claude\skills`); add
-  `-SkillDir <folder>` for another agent's skills directory. For one game only, copy it into that game's own skills
-  folder instead (for Claude Code, `<game>\.claude\skills\ags-mcp\`).
+  agent's skills directory. `install.ps1 -InstallSkill` installs both for Claude Code (`~\.claude\skills`); add
+  `-SkillDir <folder>` for another agent's skills directory. For one game only, copy them into that game's own skills
+  folder instead (for Claude Code, `<game>\.claude\skills\ags-mcp\` and `...\chiptune\`).
 - **Other agents:** copy the folder anywhere and point the agent's instructions file in your game folder
   (`AGENTS.md`, `GEMINI.md`, …) at it:
 
@@ -279,8 +281,8 @@ the room script.
 | `audiocliptype` (as an entity type) | Audio types (Sound, Music, Ambient Sound…): `MaxChannels`, crossfade, speech volume reduction; create and delete. |
 | `audiofolder` (as an entity type) | Audio folders, by name: their default type, bundling, volume, priority and repeat (inherited by clips set to Inherit); create (optionally under a `Parent`), rename, and delete when empty. |
 
-The server does not synthesise sound itself; the agent skill's `scripts/sfx.py` generates WAVs with numpy for
-`import_audio` (see [skills/ags-mcp/references/audio.md](skills/ags-mcp/references/audio.md)).
+The server does not synthesise sound itself; the `chiptune` skill (`skills/chiptune/`) composes and renders WAVs
+with numpy, and [skills/ags-mcp/references/audio.md](skills/ags-mcp/references/audio.md) covers importing them.
 
 ### Build and run
 | Tool | Description |
@@ -345,7 +347,8 @@ src/AgsMcp.Editor/       editor plugin (AGS.Plugin.Mcp.dll), .NET Framework 4.6
 src/AgsMcp.Engine/       native engine plugin (agsmcp.dll), C++/x86, CMake
 tests/AgsMcp.Editor.Tests/   unit tests
 tests/smoke/smoke.ps1        end-to-end smoke test against a live editor
-skills/ags-mcp/              agent skill (SKILL.md) for working on a game through these tools, with pixel-art and sound helpers
+skills/ags-mcp/              agent skill (SKILL.md) for working on a game through these tools, with a pixel-art helper
+skills/chiptune/             agent skill for composing and synthesising game music and sound effects (engine-agnostic)
 install.ps1                  installer (downloads a release, or installs from one)
 AGENTS.md                    instructions for coding agents working on this repo (CLAUDE.md imports it)
 build.ps1                    build, test, deploy and package

@@ -39,7 +39,7 @@ The `ags` MCP server lives inside the running AGS 3.6 editor and edits **the pro
 
 **Characters, inventory, dialogs.** `create_entity` with the properties the game's other entities use (look at one with `get_properties` first), `create_view` for animations, `set_event` for GlobalScript handlers, `set_dialog_script` for options and the dialog script. See [references/scripting.md](references/scripting.md) for the patterns.
 
-**Sound and music.** Generate WAVs with a seeded Python script using `scripts/sfx.py` ([references/audio.md](references/audio.md)), check them with `sfx.py info`/`preview`, then `import_audio` each one into the right folder and type, `save_project`, and play them from script (`aKnock.Play();`). Never hand-edit `Game.agf` to add clips.
+**Sound and music.** Synthesise WAVs with the `chiptune` skill (installed beside this one; in the repo, `skills/chiptune/`): its `scripts/chip.py` and `scripts/sfx.py` make music, stingers, ambience loops and effects with numpy from a seeded generator script in `<game>/Audio/`. Then follow [references/audio.md](references/audio.md): `import_audio` each file into the right folder and type, `save_project`, and play it from script (`aKnock.Play();`). Never hand-edit `Game.agf` to add clips.
 
 **Script-only changes.** `read_script` the relevant part, `edit_script` with a `find` unique enough to match once, `compile`. `find_usages` before renaming or removing anything.
 
@@ -88,4 +88,4 @@ Read each one when you reach that part of the job rather than all up front; they
 - [references/scripting.md](references/scripting.md): AGS 3.6 script patterns that work (handlers, inventory, state, dialog scripts, NPC entrances, ambient animated characters), colour numbers for `set_properties`, and the usual pitfalls (line endings, define-before-use, a stale editor copy). Read it before writing handlers.
 - [references/playtesting.md](references/playtesting.md): the `game_*` loop (cursor modes, waiting correctly, dismissing message boxes, exact assertions), engine and save behaviour that looks like a bug but is not, and the `desktop_*` loop for release builds. The play-test subagent reads it before it checks behaviour in the running game.
 - [references/pixel-art.md](references/pixel-art.md): generating crisp pixel-art backgrounds and sprites with Python/PIL, plus `scripts/pixelart.py`. Read it when you are about to draw.
-- [references/audio.md](references/audio.md): synthesising sound effects, ambience loops and music with numpy, plus `scripts/sfx.py`, and importing them as audio clips. Read it when the game needs sound.
+- [references/audio.md](references/audio.md): importing generated sound as audio clips, AGS audio types, folders and channels, levels, and replacing a clip later. The synthesis itself is the `chiptune` skill's job. Read it when the game needs sound.

@@ -1,8 +1,6 @@
-# Making sound for an AGS game
+# Sound in an AGS game
 
-There are no sound assets to fetch, so synthesise them: numpy writes a WAV in a few lines, and `import_audio` registers it as an audio clip. Never edit `Game.agf` by hand to add clips.
-
-`scripts/sfx.py` (next to this skill) has the helpers used below. Copy it into the game's `Audio/` folder or import it from the skill path. It needs numpy; `preview` also needs PIL.
+There are no sound assets to fetch, so synthesise them: the `chiptune` skill (installed beside this one; `skills/chiptune/` in the repo) makes music, stingers, ambience loops and effects with numpy, from a seeded generator script, and `import_audio` registers each file as an audio clip. Never edit `Game.agf` by hand to add clips.
 
 ## The loop
 
@@ -10,80 +8,20 @@ There are no sound assets to fetch, so synthesise them: numpy writes a WAV in a 
    - `list_entities audioclip`, plus `get_properties audioclip <name>` on one clip, to see the naming, folders and types in use.
    - `list_entities audiocliptype` (usually 1 Ambient Sound, 2 Music, 3 Sound) and `list_entities audiofolder`, plus `get_properties audiofolder <name>` for each folder's defaults.
    - `find_usages` on a clip, to see how the scripts play it.
-2. **Write one seeded generator script per family of sounds**, beside its output in the game's `Audio/` folder (for example `Audio/effects_gen.py` writes `Audio/fx_*.wav`). Seed it (`sfx.seed(...)`) so the sounds regenerate the same way, and keep it so they can be tweaked later.
-3. **Check every clip in the script:** `check_oneshot(x)` for one-shots and `check_loop(x)` for loops. Then look at it: `python sfx.py info Audio/*.wav` for levels, ends and seams, and `python sfx.py preview Audio/sheet.png Audio/fx_*.wav` for a spectrogram you can open. You cannot listen, so these are your ears: a knock should show short broadband strikes, a hum a steady low line, a melody steps between lines.
+2. **Generate** with the `chiptune` skill: read its `SKILL.md`, copy its `scripts/chip.py` and `scripts/sfx.py` into `<game>/Audio/`, and write the generators there (`Audio/music.py` for the cues, `Audio/effects.py` for the one-shots, with `.mid` files beside them). They write `Audio/mus_*.wav`, `Audio/fx_*.wav`, `Audio/amb_*.wav`. AGS packs only the clips it imported, so the scripts in `Audio/` ship nothing.
+3. **Check every file** as that skill says: the generators enforce seamless loops and clean one-shot ends; `python chip.py info Audio/*.wav` prints levels, and `python chip.py preview Audio/sheet.png Audio/mus_*.wav` draws spectrograms you can read. You cannot listen; these are your ears.
 4. **Import:** `import_audio path=<game>\Audio\fx_knock.wav name=aKnock folder=Sounds type=Sound`.
    - Without `name`, the clip is named `a` + the file name (`fx_knock.wav` → `aFx_knock`).
    - `type` and `bundling` default to the folder's defaults.
    - The result gives `scriptName` (for scripts) and `index` (for view frames' `sound`).
 5. **Persist:** `save_project` (clips live in `Game.agf`).
-6. **Play it in script** (`aKnock.Play();`), then `compile`, then play-test.
-
-## Recipes
-
-```python
-from sfx import *
-seed(11)
-
-# UI blip: a short rising sweep with a fast envelope.
-blip = level(fade(sweep(660, 990, 0.12) * adsr(0.12, 0.004, 0.04, 0.5, 0.06)), peak_db=-6)
-
-# Knock / footstep / wooden thing: low modes that die fast, plus a little noise for the contact.
-hit = modes([180, 410, 690, 1150], [0.06, 0.035, 0.02, 0.012], [1, 0.5, 0.3, 0.15], 0.4) + 0.25 * burst(0.4, 300, 3000, 0.006)
-knock = silence(0.9)
-for at in (0.0, 0.22, 0.44):
-    place(knock, hit, at + 0.01)
-knock = level(fade(reverb(knock, 0.5, 0.25), out_s=0.08))
-check_oneshot(knock)
-write_wav("fx_knock.wav", knock)
-
-# Metal / bell / glass: higher, longer, inharmonic modes (ratios like 1, 2.76, 5.4, 8.93).
-bell = modes([440 * r for r in (1, 2.76, 5.4, 8.93)], [1.6, 0.9, 0.5, 0.3], [1, 0.6, 0.35, 0.2], 3.0)
-
-# Door creak: stick-slip clicks gliding in pitch.
-door = level(fade(creak(320, 1.2, 60, ring=1.5, f1=410), out_s=0.1))
-
-# Whoosh / wind gust: band noise with a swelling envelope.
-whoosh = level(fade(noise(0.8, 300, 3000, tilt=1) * np.hanning(n(0.8))))
-```
-
-**Ambience beds (seamless loops).** Every part must be periodic over the loop length:
-
-```python
-L = 12.0                                                   # loop length in seconds
-bed = noise(L, 60, 900, tilt=1, circular=True) * (0.6 + 0.4 * lfo(L, 3))   # whole cycles only
-bed += 0.3 * osc(loop_safe(55, L), L) * lfo(L, 1, 1.0)     # hum, rounded to whole cycles
-drip = modes([1800], [0.05], [1], 0.3)
-for at in (1.3, 5.9, 10.4):
-    place(bed, 0.4 * drip, at, wrap=True)                  # events near the end wrap to the start
-bed = level(reverb(bed, 1.5, 0.4, circular=True), rms_db=-22)
-check_loop(bed)
-```
-
-**Music.** Build notes with `note("D4")`, voice them with `modes()` (plucked or bell-like) or stacked `osc()` partials times `adsr()` (pads, organ), and `place()` them on a beat grid (`step = 60 / bpm`).
-- **Looping cues:** make the length a whole number of bars, use `wrap=True` and a circular reverb, then `level(x, rms_db=-16, peak_db=-1, remove_dc=True, soft=True)`.
-- **Stingers** (one-shots): fade the end and leave room for the tail.
+6. **Play it in script** (`aKnock.Play();`, `aMusTitle.Play(eAudioPriorityNormal, eRepeat);`), then `compile`, then play-test.
 
 ## Levels
 
-**Render loud; the engine can only turn a clip down.** This holds in any engine: clip and channel volume top out at full (100 in AGS; 1 in Unity and the Decentraland Explorer), so a quiet file stays quiet however high the script sets it. Bake the loudness into the file, then trim in the game: in AGS a folder `DefaultVolume` around 70 leaves room to go up as well as down.
+**Render loud; the engine can only turn a clip down.** Clip and channel volume top out at 100, so a quiet file stays quiet however high the script sets it. Bake the loudness into the file (the chiptune skill's targets: music RMS −18 to −14 dBFS, one-shots peak −3, beds RMS −26 to −20), then trim in the game: a folder `DefaultVolume` around 70 leaves room to go up as well as down.
 
-- `level(x)` peaks a one-shot at −3 dBFS.
-- `level(x, rms_db=...)` sets loudness for beds and music, with the peak still capped. Music's peaks sit 10–17 dB above its RMS, so at the louder targets below the cap stops it short.
-- `level(x, rms_db=..., soft=True)` lets the RMS target win and soft-limits the peaks (`limit()`, per-sample, so loops stay seamless). Use it for music. A few dB of limiting is hard to hear; much more thickens the sound.
-
-**The numbers are a starting point, not a standard.** They were tuned by ear in one game played in the Decentraland Explorer, where music rendered at RMS −24 to −28 was too quiet even at full volume. They have not been checked by ear in an AGS game: generate, play the game, and adjust. The relations between them (beds under music, one-shots heard over it) matter more than the exact values.
-
-| Kind | Target |
-|---|---|
-| UI blips, small props | peak −6 to −3 |
-| Doors, hits, events | peak −3 to −1 |
-| Music | RMS −18 to −14 (`soft=True`, peak −1) |
-| Ambience beds | RMS −26 to −20, under the music and the dialogue |
-
-**Check one-shots' RMS, not only their peak.** A sharp click or card snap peaked at −3 can sit at RMS −26 and vanish under music at −16. Give such sounds a short `level(x, rms_db=-20, peak_db=-1, soft=True)`.
-
-A consistent set matters more than the exact numbers: generate siblings in one script and print their `stats()`.
+The numbers were tuned by ear in another engine and have not been checked by ear in an AGS game: generate, play the game, and adjust. The relations between them (beds under music, one-shots heard over it) matter more than the exact values. Generate siblings in one script and compare their printed stats; a clip 4 dB louder than its family is a bug.
 
 ## Audio types, folders and channels
 
@@ -105,4 +43,4 @@ A consistent set matters more than the exact numbers: generate siblings in one s
 
 ## Formats
 
-WAV (16-bit mono, 22050 Hz from `write_wav`) is the simplest and always works. OGG is much smaller for long music and ambience. If `ffmpeg` or `oggenc` is installed and the game's size matters, convert (`ffmpeg -i bed.wav -c:a libvorbis -q:a 4 bed.ogg`) and import the `.ogg` instead. Keep the WAV-producing script either way.
+WAV (16-bit, 44100 Hz from the generators; music stereo, effects mono) is the simplest and always works. OGG is much smaller for long music and ambience: `save_ogg` in `chip.py` (needs the `soundfile` package) or `ffmpeg -i bed.wav -c:a libvorbis -q:a 4 bed.ogg`, then import the `.ogg` instead. Never MP3 for a loop (encoder padding breaks the seam). Keep the WAV-producing script either way.

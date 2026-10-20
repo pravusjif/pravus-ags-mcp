@@ -148,8 +148,10 @@ function Invoke-AgsMcpInstall {
             $p = Join-Path $dir $f
             if (Test-Path $p) { Remove-Item $p -Force; Write-Host "Removed $p" }
         }
-        $skill = Join-Path $SkillDir "ags-mcp"
-        if (Test-Path $skill) { Write-Host "The skill at $skill was left in place; delete it by hand if you no longer want it." }
+        foreach ($name in @("ags-mcp", "chiptune")) {
+            $skill = Join-Path $SkillDir $name
+            if (Test-Path $skill) { Write-Host "The skill at $skill was left in place; delete it by hand if you no longer want it." }
+        }
         Write-Host "Pravus AGS MCP uninstalled." -ForegroundColor Green
         return
     }
@@ -180,15 +182,18 @@ function Invoke-AgsMcpInstall {
         Write-Host "Pravus AGS MCP $ver installed into $dir" -ForegroundColor Green
 
         if ($InstallSkill) {
-            $skillSrc = Join-Path $release "skills\ags-mcp"
-            if (Test-Path $skillSrc) {
-                $skillDst = Join-Path $SkillDir "ags-mcp"
-                if (Test-Path $skillDst) { Remove-Item $skillDst -Recurse -Force }
-                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $skillDst) | Out-Null
-                Copy-Item $skillSrc $skillDst -Recurse
-                Write-Host "Installed the ags-mcp skill into $skillDst"
-            } else {
-                Write-Warning "This release has no skills\ags-mcp folder; skipped the skill."
+            # ags-mcp drives the editor; chiptune makes the sound it imports. They install side by side.
+            foreach ($name in @("ags-mcp", "chiptune")) {
+                $skillSrc = Join-Path $release "skills\$name"
+                if (Test-Path $skillSrc) {
+                    $skillDst = Join-Path $SkillDir $name
+                    if (Test-Path $skillDst) { Remove-Item $skillDst -Recurse -Force }
+                    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $skillDst) | Out-Null
+                    Copy-Item $skillSrc $skillDst -Recurse
+                    Write-Host "Installed the $name skill into $skillDst"
+                } else {
+                    Write-Warning "This release has no skills\$name folder; skipped that skill."
+                }
             }
         }
         Write-NextSteps

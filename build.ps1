@@ -74,8 +74,10 @@ if ($Package) {
     if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
     New-Item -ItemType Directory -Force -Path "$stage\skills" | Out-Null
     Copy-Item $pluginDll, $engineDll, "$root\install.ps1", "$root\README.md", "$root\LICENSE" $stage
-    Copy-Item "$root\skills\ags-mcp" "$stage\skills\ags-mcp" -Recurse
-    Remove-Item "$stage\skills\ags-mcp\evals" -Recurse -Force -ErrorAction SilentlyContinue
+    foreach ($skill in @("ags-mcp", "chiptune")) {
+        Copy-Item "$root\skills\$skill" "$stage\skills\$skill" -Recurse
+        Remove-Item "$stage\skills\$skill\evals" -Recurse -Force -ErrorAction SilentlyContinue
+    }
     Get-ChildItem "$stage\skills" -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
     $zip = "$dist\$name.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }

@@ -1,0 +1,55 @@
+{
+  "skill_name": "chiptune",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "My haunted-carnival game needs music. Write me a title theme and a battle loop that share a motif: the title should feel like a sad, out-of-tune calliope waltz with nobody on the rides, and the battle track fast and driving, like a NES boss fight with a bit of 16-bit polish. Both must loop seamlessly. Also a short 'you died' stinger. Put the WAVs in ./audio and keep whatever script you write so I can tweak the tunes later.",
+      "expected_output": "Three audio files in ./audio (title loop, battle loop, death stinger) produced by a seeded generator script that stays in the repo; the two loops wrap without a seam; the stinger starts and ends in silence; the two loops share a recognisable motif (same note sequence, transposed or re-timed); the generator separates the composition from the instruments and writes MIDI of the composition.",
+      "files": [],
+      "expectations": [
+        "Three WAV (or OGG) files exist under ./audio: a title loop, a battle loop and a death stinger",
+        "Both loops pass a seam check: the jump from the last sample back to the first is no bigger than 1.5 times the clip's 99th-percentile sample step, and neither clips (peak under -0.1 dBFS)",
+        "The stinger starts at silence and ends in silence (last 5 ms under 1% of peak)",
+        "A Python generator script was written and kept in the repo, seeds its randomness, and regenerates identical files when run again",
+        "The title is in 3/4 (a waltz grid: 3 beats per bar) at a slow tempo and the battle track is at 130 bpm or faster",
+        "The title and the battle cue share a motif: the same sequence of at least four pitch intervals appears in both scores (allowing transposition and different note lengths)",
+        "The generator keeps the composition (patterns/notes) separate from the instrument choice (voices/effects), so instruments can be swapped without editing the note patterns",
+        "A .mid file of each cue's composition was written",
+        "The music RMS is between -20 and -12 dBFS for both loops and the stinger peaks between -6 and -1 dBFS",
+        "The final message tells the user it could not listen, gives the levels, and names concrete things to listen for or tweak"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I'm prototyping a 16-bit style sci-fi adventure (think SNES era). Graybox the soundtrack for me: an exploration loop, a tension loop for when the alarm is on, and a victory jingle. Placeholder instruments are fine for now, I just want to hear the tunes. Then, as a separate second step, give me a 'dressed' version with proper 16-bit-style instruments and effects without changing the tunes at all; I need to be able to prove the composition didn't change between the two versions. Output into ./soundtrack/graybox and ./soundtrack/dressed.",
+      "expected_output": "Two renders of each of the three cues (graybox and dressed) in the two folders; MIDI files of the compositions that are byte-identical between the two passes; a generator whose scores are untouched by the dressing pass (only kits/instrument mappings changed); the dressed versions use different voices and effects (echo, pad, FM or similar) from the graybox; loops seamless and the jingle a clean one-shot.",
+      "files": [],
+      "expectations": [
+        "Both ./soundtrack/graybox and ./soundtrack/dressed contain an exploration loop, a tension loop and a victory jingle",
+        "For each cue, a MIDI file exists for both passes and the two files are byte-identical (or a single MIDI is shared with the agent showing a hash proving it did not change)",
+        "The note patterns / score definitions in the generator are identical between the two passes (a diff of the scores is empty; only instrument/kit definitions differ)",
+        "The dressed render of each cue differs audibly from the graybox: different voices or effects (for example echo, a pad, FM bass, reverb), verified by the generator's kit definitions and by the files not being identical",
+        "All four loops (two per pass) pass the seam check and the two jingles start and end in silence",
+        "The tension loop is distinguishable from the exploration loop in character: faster tempo, denser rhythm or darker harmony per the score definitions",
+        "The agent explains the graybox/dressed contract to the user: scores fixed, kits swapped, MIDI as the proof",
+        "The generator script runs from the command line and regenerates both passes (e.g. a --graybox flag or two kit sets)"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Make the sound effects for my card-duel game: card played, card drawn, shuffle, lose a heart, win the duel, lose the duel, and a soft two-note blip when a character starts talking. Retro feel (bleepy, like an old console), consistent loudness across the set, mono WAVs into ./sfx. They have to come out identical if I run the script again.",
+      "expected_output": "Seven mono WAV one-shots in ./sfx made by one seeded Python script; each starts and ends in silence without clipping; levels are consistent (peaks within a few dB, quieter things like the talk blip deliberately quieter); the voices are synthesised (pulse/square tones, noise bursts, modal hits), not sampled; re-running the script reproduces the same bytes.",
+      "files": [],
+      "expectations": [
+        "Seven WAV files exist in ./sfx: card played, card drawn, shuffle, lose a heart, win, lose, talk blip",
+        "Every file is mono PCM WAV",
+        "Every file starts at silence (first sample under 1% of peak) and ends in silence (last 5 ms under 1% of peak) and does not clip",
+        "Running the generator script a second time produces byte-identical files",
+        "Peaks are consistent across the set: the loudest and quietest of the six non-blip effects are within 6 dB of each other, and the talk blip is quieter than the win/lose jingles",
+        "The win and lose effects are short jingles with pitched notes (several distinct pitches), the lose one descending or in a minor/dark character",
+        "The sounds are synthesised in Python (numpy or similar), not downloaded or sampled from existing audio",
+        "The script has one function or entry per effect with a short description of the sound, and its randomness is seeded deterministically (one seed, or one constant per effect)"
+      ]
+    }
+  ]
+}
